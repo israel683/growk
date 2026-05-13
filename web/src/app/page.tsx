@@ -5,6 +5,7 @@ import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { getActiveSystem } from "@/lib/system";
+import { StackedQuestion } from "@/components/StackedQuestion";
 
 const STARTERS = [
   "מה מצב הצמחים עכשיו?",
@@ -75,9 +76,19 @@ export default function ChatPage() {
           </div>
         )}
 
-        {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} />
-        ))}
+        {messages.map((m, idx) => {
+          const isLast = idx === messages.length - 1;
+          const isAssistant = m.role === "assistant";
+          return (
+            <MessageBubble
+              key={m.id}
+              message={m}
+              isLastAssistant={isLast && isAssistant}
+              awaitingAnswer={!isStreaming}
+              onAnswer={(text) => handleSubmit(text)}
+            />
+          );
+        })}
 
         {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
           <div className="flex items-center gap-2 text-zinc-400 text-sm">
@@ -137,7 +148,17 @@ export default function ChatPage() {
 
 type UIMessageType = ReturnType<typeof useChat>["messages"][number];
 
-function MessageBubble({ message }: { message: UIMessageType }) {
+function MessageBubble({
+  message,
+  isLastAssistant,
+  onAnswer,
+  awaitingAnswer,
+}: {
+  message: UIMessageType;
+  isLastAssistant: boolean;
+  onAnswer: (text: string) => void;
+  awaitingAnswer: boolean;
+}) {
   const isUser = message.role === "user";
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -177,7 +198,41 @@ function MessageBubble({ message }: { message: UIMessageType }) {
             );
           }
           if (typeof part.type === "string" && part.type.startsWith("tool-")) {
-            return <ToolPart key={i} part={part} />;
+            const toolName = part.type.replace(/^tool-/, "");
+            // askGrower renders as a stacked-question card the user can click.
+            // Active only on the latest assistant message so old questions
+            // don't re-trigger.
+            if (toolName === "askGrower") {
+              const input = (part as { input?: { question?: string; options?: Array<{ value: string; label: string; description?: string }>; multi?: boolean } }).input;
+              if (input?.question && input?.options && input.options.length > 0) {
+                return (
+                  <StackedQuestion
+                    key={i}
+                    question={input.question}
+                    options={input.options}
+                    multi={input.multi}
+                    onAnswer={onAnswer}
+                    disabled={!isLastAssistant || !awaitingAnswer}
+                  />
+                );
+              }
+              // Free-text question (no options) → just show the question; the
+              // grower types in the regular input box.
+              return input?.question ? (
+                <div
+                  key={i}
+                  className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 my-2 max-w-md"
+                >
+                  <p className="font-medium text-sm leading-relaxed">{input.question}</p>
+                  <p className="text-xs text-zinc-400 mt-2">ענה למטה בתיבת ההודעות ↓</p>
+                </div>
+              ) : null;
+            }
+            // updateSystem is a silent side-effect — don't render a card.
+            if (toolName === "updateSystem") {
+              return null;
+            }
+            return <ToolPart key={i} part={part as { type: string } & Record<string, unknown>} />;
           }
           return null;
         })}

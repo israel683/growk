@@ -10,6 +10,7 @@ import {
   getPendingTasks,
   createHumanTask,
   getSystem,
+  updateSystem,
   DEFAULT_SYSTEM_ID,
 } from "./db";
 
@@ -192,6 +193,68 @@ export function buildAgentTools(systemId: string = DEFAULT_SYSTEM_ID) {
           kind: "observation_request_created",
           task_id: taskId,
           observation_type: params.observation_type,
+        };
+      },
+    }),
+
+    askGrower: tool({
+      description:
+        "Ask the grower a question that needs a specific answer. If `options` are provided, the UI renders clickable cards (stacked-questions pattern) and the grower picks. If no options, the UI shows a normal text reply prompt. Use this for closed-set questions during system setup or follow-ups — much faster for the grower than typing. Always phrase questions in Hebrew unless context dictates otherwise.",
+      inputSchema: z.object({
+        question: z.string().describe("The question text in Hebrew"),
+        options: z
+          .array(
+            z.object({
+              value: z.string().describe("Internal value (English, used in updateSystem etc.)"),
+              label: z.string().describe("Hebrew label shown to the grower"),
+              description: z.string().optional().describe("Optional short Hebrew description below label"),
+            })
+          )
+          .optional()
+          .describe("Closed-set options. Omit for free-text questions."),
+        multi: z
+          .boolean()
+          .default(false)
+          .optional()
+          .describe("If true, the grower can pick multiple options"),
+      }),
+      // This tool is UI-only — the chat client renders the question and sends
+      // the grower's reply as the next message. The execute return is just so
+      // the tool resolves cleanly in the model loop.
+      execute: async (params) => ({ rendered: true, ...params }),
+    }),
+
+    updateSystem: tool({
+      description:
+        "Save what you learned about this system to its profile (name, crop, growth stage, reservoir size, location, notes). Call this whenever you've collected new info — typically right after the grower answers via askGrower. Only include the fields you want to change. The grower never sees this tool call directly; just confirm verbally what you saved.",
+      inputSchema: z.object({
+        name: z.string().optional().describe("Display name in Hebrew"),
+        crop_type: z
+          .enum(["lettuce", "basil", "spinach", "strawberry", "tomato"])
+          .optional(),
+        growth_stage: z
+          .enum(["seedling", "vegetative", "flowering", "fruiting"])
+          .optional(),
+        reservoir_liters: z.number().min(5).max(2000).optional(),
+        system_type: z.string().optional(),
+        location: z.string().optional(),
+        outdoor: z.boolean().optional(),
+        notes: z.string().optional(),
+      }),
+      execute: async (patch) => {
+        const updated = await updateSystem(systemId, patch);
+        return {
+          ok: true,
+          applied: patch,
+          system: updated
+            ? {
+                id: updated.id,
+                name: updated.name,
+                crop_type: updated.crop_type,
+                growth_stage: updated.growth_stage,
+                reservoir_liters: updated.reservoir_liters,
+              }
+            : null,
         };
       },
     }),
