@@ -1,0 +1,43 @@
+# === Secrets — NEVER commit ===
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.python-version
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# === SQLite local state ===
+*.db
+*.db-shm
+*.db-wal
+
+# === Node / Next.js ===
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+.vercel/
+
+# === OS / Editor ===
+.DS_Store
+.idea/
+.vscode/
+
+# === Logs / tmp ===
+*.log
+/tmp/
+
+# === User data ===
+data/
