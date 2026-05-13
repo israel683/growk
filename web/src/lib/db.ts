@@ -125,6 +125,40 @@ export async function ensureSchema(): Promise<void> {
   await safeDdl(() => s`CREATE INDEX IF NOT EXISTS idx_actions_ts ON dosing_actions(system_id, ts DESC)`);
   await safeDdl(() => s`CREATE INDEX IF NOT EXISTS idx_tasks_pending ON human_tasks(system_id, status, priority)`);
 
+  // First-class systems table — each row is an isolated project.
+  await safeDdl(() => s`
+    CREATE TABLE IF NOT EXISTS systems (
+      id                TEXT PRIMARY KEY,
+      name              TEXT NOT NULL,
+      status            TEXT NOT NULL DEFAULT 'active',
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      archived_at       TIMESTAMPTZ,
+      crop_type         TEXT NOT NULL DEFAULT 'lettuce',
+      growth_stage      TEXT NOT NULL DEFAULT 'vegetative',
+      reservoir_liters  INTEGER NOT NULL DEFAULT 60,
+      system_type       TEXT NOT NULL DEFAULT 'nft_wall_mounted',
+      location          TEXT NOT NULL DEFAULT 'Tel Aviv, Israel',
+      outdoor           BOOLEAN NOT NULL DEFAULT TRUE,
+      ai_cycle_minutes  INTEGER NOT NULL DEFAULT 60,
+      tuya_device_id    TEXT,
+      notes             TEXT
+    )
+  `);
+
+  // Auto-create the 'default' row so existing data has a parent.
+  await safeDdl(() => s`
+    INSERT INTO systems (id, name, crop_type, growth_stage, reservoir_liters,
+                         system_type, location, outdoor, tuya_device_id)
+    VALUES ('default', 'מערכת ראשית', ${process.env.CROP_TYPE || "lettuce"},
+            ${process.env.GROWTH_STAGE || "vegetative"},
+            ${Number(process.env.RESERVOIR_LITERS || 60)},
+            ${process.env.SYSTEM_TYPE || "nft_wall_mounted"},
+            ${process.env.LOCATION || "Tel Aviv, Israel"},
+            TRUE,
+            ${process.env.TUYA_SENSOR_DEVICE_ID || null})
+    ON CONFLICT (id) DO NOTHING
+  `);
+
   _schemaReady = true;
 }
 
@@ -194,11 +228,138 @@ export type HumanTask = {
   decision_id: number | null;
 };
 
-export const SYSTEM_ID = process.env.SYSTEM_ID || "default";
+// Backward-compat default systemId. New code should pass systemId explicitly.
+export const DEFAULT_SYSTEM_ID = "default";
+
+// === Systems CRUD ===
+
+export type SystemRow = {
+  id: string;
+  name: string;
+  status: "active" | "paused" | "archived";
+  created_at: Date;
+  archived_at: Date | null;
+  crop_type: string;
+  growth_stage: string;
+  reservoir_liters: number;
+  system_type: string;
+  location: string;
+  outdoor: boolean;
+  ai_cycle_minutes: number;
+  tuya_device_id: string | null;
+  notes: string | null;
+};
+
+function rowToSystem(row: Record<string, unknown>): SystemRow {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    status: row.status as SystemRow["status"],
+    created_at: new Date(row.created_at as string),
+    archived_at: row.archived_at ? new Date(row.archived_at as string) : null,
+    crop_type: row.crop_type as string,
+    growth_stage: row.growth_stage as string,
+    reservoir_liters: Number(row.reservoir_liters),
+    system_type: row.system_type as string,
+    location: row.location as string,
+    outdoor: Boolean(row.outdoor),
+    ai_cycle_minutes: Number(row.ai_cycle_minutes),
+    tuya_device_id: (row.tuya_device_id as string) ?? null,
+    notes: (row.notes as string) ?? null,
+  };
+}
+
+export async function listSystems(includeArchived = false): Promise<SystemRow[]> {
+  await ensureSchema();
+  const s = sql();
+  const rows = (includeArchived
+    ? await s`SELECT * FROM systems ORDER BY created_at DESC`
+    : await s`SELECT * FROM systems WHERE status <> 'archived' ORDER BY created_at DESC`) as unknown as Array<Record<string, unknown>>;
+  return rows.map(rowToSystem);
+}
+
+export async function getSystem(id: string): Promise<SystemRow | null> {
+  await ensureSchema();
+  const s = sql();
+  const rows = (await s`SELECT * FROM systems WHERE id = ${id}`) as unknown as Array<Record<string, unknown>>;
+  return rows[0] ? rowToSystem(rows[0]) : null;
+}
+
+export async function createSystem(input: {
+  id: string;
+  name: string;
+  crop_type?: string;
+  growth_stage?: string;
+  reservoir_liters?: number;
+  system_type?: string;
+  location?: string;
+  outdoor?: boolean;
+  ai_cycle_minutes?: number;
+  tuya_device_id?: string | null;
+  notes?: string | null;
+}): Promise<SystemRow> {
+  await ensureSchema();
+  const s = sql();
+  const rows = (await s`
+    INSERT INTO systems (id, name, crop_type, growth_stage, reservoir_liters,
+                         system_type, location, outdoor, ai_cycle_minutes,
+                         tuya_device_id, notes)
+    VALUES (
+      ${input.id}, ${input.name},
+      ${input.crop_type ?? "lettuce"},
+      ${input.growth_stage ?? "vegetative"},
+      ${input.reservoir_liters ?? 60},
+      ${input.system_type ?? "nft_wall_mounted"},
+      ${input.location ?? "Tel Aviv, Israel"},
+      ${input.outdoor ?? true},
+      ${input.ai_cycle_minutes ?? 60},
+      ${input.tuya_device_id ?? null},
+      ${input.notes ?? null}
+    )
+    RETURNING *
+  `) as unknown as Array<Record<string, unknown>>;
+  return rowToSystem(rows[0]);
+}
+
+export async function updateSystem(
+  id: string,
+  patch: Partial<Omit<SystemRow, "id" | "created_at" | "archived_at">>
+): Promise<SystemRow | null> {
+  await ensureSchema();
+  const s = sql();
+  // Build dynamic update by running individual updates (Neon's tagged-template
+  // limit makes building a dynamic SET clause awkward; do per-field updates).
+  const fields: Array<[keyof typeof patch, unknown]> = [];
+  if (patch.name !== undefined) fields.push(["name", patch.name]);
+  if (patch.status !== undefined) fields.push(["status", patch.status]);
+  if (patch.crop_type !== undefined) fields.push(["crop_type", patch.crop_type]);
+  if (patch.growth_stage !== undefined) fields.push(["growth_stage", patch.growth_stage]);
+  if (patch.reservoir_liters !== undefined) fields.push(["reservoir_liters", patch.reservoir_liters]);
+  if (patch.system_type !== undefined) fields.push(["system_type", patch.system_type]);
+  if (patch.location !== undefined) fields.push(["location", patch.location]);
+  if (patch.outdoor !== undefined) fields.push(["outdoor", patch.outdoor]);
+  if (patch.ai_cycle_minutes !== undefined) fields.push(["ai_cycle_minutes", patch.ai_cycle_minutes]);
+  if (patch.tuya_device_id !== undefined) fields.push(["tuya_device_id", patch.tuya_device_id]);
+  if (patch.notes !== undefined) fields.push(["notes", patch.notes]);
+  for (const [k, v] of fields) {
+    // The column name is constrained to the known list above so injection-safe.
+    await s.query(`UPDATE systems SET ${k as string} = $1 WHERE id = $2`, [v, id]);
+  }
+  return getSystem(id);
+}
+
+export async function archiveSystem(id: string): Promise<void> {
+  await ensureSchema();
+  const s = sql();
+  await s`UPDATE systems SET status = 'archived', archived_at = NOW() WHERE id = ${id}`;
+}
 
 // === Readings ===
 
-export async function saveReading(r: Omit<WaterReading, "ts" | "id"> & { ts?: Date }) {
+export async function saveReading(
+  r: Omit<WaterReading, "ts" | "id"> & { ts?: Date },
+  systemId: string = DEFAULT_SYSTEM_ID
+) {
   await ensureSchema();
   const s = sql();
   const ts = r.ts ?? new Date();
@@ -206,19 +367,23 @@ export async function saveReading(r: Omit<WaterReading, "ts" | "id"> & { ts?: Da
     INSERT INTO sensor_readings
       (system_id, ts, ph, ec, tds, orp, water_temp, cf, salinity, sg, source)
     VALUES
-      (${SYSTEM_ID}, ${ts.toISOString()}, ${r.ph}, ${r.ec}, ${r.tds}, ${r.orp},
+      (${systemId}, ${ts.toISOString()}, ${r.ph}, ${r.ec}, ${r.tds}, ${r.orp},
        ${r.water_temp}, ${r.cf}, ${r.salinity}, ${r.sg}, ${r.source})
   `;
 }
 
-export async function getRecentReadings(hours = 24, limit = 500): Promise<WaterReading[]> {
+export async function getRecentReadings(
+  hours = 24,
+  limit = 500,
+  systemId: string = DEFAULT_SYSTEM_ID
+): Promise<WaterReading[]> {
   await ensureSchema();
   const s = sql();
   const cutoff = new Date(Date.now() - hours * 3600 * 1000).toISOString();
   const rows = (await s`
     SELECT id, ts, ph, ec, tds, orp, water_temp, cf, salinity, sg, source
     FROM sensor_readings
-    WHERE system_id = ${SYSTEM_ID} AND ts > ${cutoff}
+    WHERE system_id = ${systemId} AND ts > ${cutoff}
     ORDER BY ts DESC LIMIT ${limit}
   `) as unknown as Array<{
     id: number;
@@ -253,7 +418,8 @@ export async function getRecentReadings(hours = 24, limit = 500): Promise<WaterR
 // === Decisions ===
 
 export async function saveDecision(
-  d: Omit<Decision, "id" | "ts"> & { ts?: Date }
+  d: Omit<Decision, "id" | "ts"> & { ts?: Date },
+  systemId: string = DEFAULT_SYSTEM_ID
 ): Promise<number> {
   await ensureSchema();
   const s = sql();
@@ -263,7 +429,7 @@ export async function saveDecision(
       (system_id, ts, status, analysis, message, raw_response,
        tokens_input, tokens_output, cache_creation_tokens, cache_read_tokens)
     VALUES
-      (${SYSTEM_ID}, ${ts.toISOString()}, ${d.status}, ${d.analysis}, ${d.message},
+      (${systemId}, ${ts.toISOString()}, ${d.status}, ${d.analysis}, ${d.message},
        ${JSON.stringify(d.raw_response)}::jsonb,
        ${d.tokens_input}, ${d.tokens_output}, ${d.cache_creation_tokens}, ${d.cache_read_tokens})
     RETURNING id
@@ -271,14 +437,17 @@ export async function saveDecision(
   return rows[0].id;
 }
 
-export async function getRecentDecisions(limit = 20): Promise<Decision[]> {
+export async function getRecentDecisions(
+  limit = 20,
+  systemId: string = DEFAULT_SYSTEM_ID
+): Promise<Decision[]> {
   await ensureSchema();
   const s = sql();
   const rows = (await s`
     SELECT id, ts, status, analysis, message, raw_response,
            tokens_input, tokens_output, cache_creation_tokens, cache_read_tokens
     FROM ai_decisions
-    WHERE system_id = ${SYSTEM_ID}
+    WHERE system_id = ${systemId}
     ORDER BY ts DESC LIMIT ${limit}
   `) as unknown as Array<{
     id: number;
@@ -297,7 +466,10 @@ export async function getRecentDecisions(limit = 20): Promise<Decision[]> {
 
 // === Dosing actions ===
 
-export async function saveAction(a: Omit<DosingAction, "ts" | "id"> & { ts?: Date }) {
+export async function saveAction(
+  a: Omit<DosingAction, "ts" | "id"> & { ts?: Date },
+  systemId: string = DEFAULT_SYSTEM_ID
+) {
   await ensureSchema();
   const s = sql();
   const ts = a.ts ?? new Date();
@@ -305,19 +477,22 @@ export async function saveAction(a: Omit<DosingAction, "ts" | "id"> & { ts?: Dat
     INSERT INTO dosing_actions
       (system_id, ts, channel, amount_ml, reason, success, ai_status, ai_analysis, decision_id)
     VALUES
-      (${SYSTEM_ID}, ${ts.toISOString()}, ${a.channel}, ${a.amount_ml}, ${a.reason},
+      (${systemId}, ${ts.toISOString()}, ${a.channel}, ${a.amount_ml}, ${a.reason},
        ${a.success}, ${a.ai_status ?? null}, ${a.ai_analysis ?? null}, ${a.decision_id ?? null})
   `;
 }
 
-export async function getRecentActions(hours = 24): Promise<DosingAction[]> {
+export async function getRecentActions(
+  hours = 24,
+  systemId: string = DEFAULT_SYSTEM_ID
+): Promise<DosingAction[]> {
   await ensureSchema();
   const s = sql();
   const cutoff = new Date(Date.now() - hours * 3600 * 1000).toISOString();
   const rows = (await s`
     SELECT id, ts, channel, amount_ml, reason, success, ai_status, ai_analysis, decision_id
     FROM dosing_actions
-    WHERE system_id = ${SYSTEM_ID} AND ts > ${cutoff}
+    WHERE system_id = ${systemId} AND ts > ${cutoff}
     ORDER BY ts ASC
   `) as unknown as Array<{
     id: number;
@@ -354,15 +529,18 @@ export const TASK_TYPES: TaskType[] = [
 ];
 export const TASK_PRIORITIES: TaskPriority[] = ["low", "medium", "high", "urgent"];
 
-export async function createHumanTask(t: {
-  type: TaskType;
-  priority: TaskPriority;
-  title: string;
-  reason: string;
-  payload?: Record<string, unknown>;
-  expires_in_hours?: number | null;
-  decision_id?: number | null;
-}): Promise<number> {
+export async function createHumanTask(
+  t: {
+    type: TaskType;
+    priority: TaskPriority;
+    title: string;
+    reason: string;
+    payload?: Record<string, unknown>;
+    expires_in_hours?: number | null;
+    decision_id?: number | null;
+  },
+  systemId: string = DEFAULT_SYSTEM_ID
+): Promise<number> {
   await ensureSchema();
   const s = sql();
   const expiresAt = t.expires_in_hours
@@ -372,7 +550,7 @@ export async function createHumanTask(t: {
     INSERT INTO human_tasks
       (system_id, type, priority, title, reason, payload, expires_at, decision_id, status)
     VALUES
-      (${SYSTEM_ID}, ${t.type}, ${t.priority}, ${t.title}, ${t.reason},
+      (${systemId}, ${t.type}, ${t.priority}, ${t.title}, ${t.reason},
        ${JSON.stringify(t.payload ?? {})}::jsonb,
        ${expiresAt}, ${t.decision_id ?? null}, 'pending')
     RETURNING id
@@ -380,14 +558,16 @@ export async function createHumanTask(t: {
   return rows[0].id;
 }
 
-export async function getPendingTasks(): Promise<HumanTask[]> {
+export async function getPendingTasks(
+  systemId: string = DEFAULT_SYSTEM_ID
+): Promise<HumanTask[]> {
   await ensureSchema();
   const s = sql();
   const rows = (await s`
     SELECT id, system_id, created_at, type, priority, title, reason, payload,
            status, expires_at, completed_at, user_response, decision_id
     FROM human_tasks
-    WHERE system_id = ${SYSTEM_ID} AND status = 'pending'
+    WHERE system_id = ${systemId} AND status = 'pending'
     ORDER BY
       CASE priority
         WHEN 'urgent' THEN 0 WHEN 'high' THEN 1
@@ -417,7 +597,8 @@ export async function getPendingTasks(): Promise<HumanTask[]> {
 }
 
 export async function getTasksByStatus(
-  status: "pending" | "done" | "dismissed" | "expired"
+  status: "pending" | "done" | "dismissed" | "expired",
+  systemId: string = DEFAULT_SYSTEM_ID
 ): Promise<HumanTask[]> {
   await ensureSchema();
   const s = sql();
@@ -425,7 +606,7 @@ export async function getTasksByStatus(
     SELECT id, system_id, created_at, type, priority, title, reason, payload,
            status, expires_at, completed_at, user_response, decision_id
     FROM human_tasks
-    WHERE system_id = ${SYSTEM_ID} AND status = ${status}
+    WHERE system_id = ${systemId} AND status = ${status}
     ORDER BY created_at DESC LIMIT 100
   `) as unknown as Array<{
     id: number;
@@ -450,33 +631,43 @@ export async function getTasksByStatus(
   }));
 }
 
-export async function completeTask(id: number, response = ""): Promise<void> {
+export async function completeTask(
+  id: number,
+  response = "",
+  systemId: string = DEFAULT_SYSTEM_ID
+): Promise<void> {
   await ensureSchema();
   const s = sql();
   await s`
     UPDATE human_tasks
     SET status = 'done', completed_at = NOW(), user_response = ${response}
-    WHERE id = ${id} AND system_id = ${SYSTEM_ID}
+    WHERE id = ${id} AND system_id = ${systemId}
   `;
 }
 
-export async function dismissTask(id: number, response = ""): Promise<void> {
+export async function dismissTask(
+  id: number,
+  response = "",
+  systemId: string = DEFAULT_SYSTEM_ID
+): Promise<void> {
   await ensureSchema();
   const s = sql();
   await s`
     UPDATE human_tasks
     SET status = 'dismissed', completed_at = NOW(), user_response = ${response}
-    WHERE id = ${id} AND system_id = ${SYSTEM_ID}
+    WHERE id = ${id} AND system_id = ${systemId}
   `;
 }
 
-export async function expireOldTasks(): Promise<number> {
+export async function expireOldTasks(
+  systemId: string = DEFAULT_SYSTEM_ID
+): Promise<number> {
   await ensureSchema();
   const s = sql();
   const rows = (await s`
     UPDATE human_tasks
     SET status = 'expired'
-    WHERE system_id = ${SYSTEM_ID}
+    WHERE system_id = ${systemId}
       AND status = 'pending'
       AND expires_at IS NOT NULL
       AND expires_at < NOW()
@@ -485,12 +676,15 @@ export async function expireOldTasks(): Promise<number> {
   return rows.length;
 }
 
-export async function hasPendingTaskOfType(t: TaskType): Promise<boolean> {
+export async function hasPendingTaskOfType(
+  t: TaskType,
+  systemId: string = DEFAULT_SYSTEM_ID
+): Promise<boolean> {
   await ensureSchema();
   const s = sql();
   const rows = (await s`
     SELECT 1 FROM human_tasks
-    WHERE system_id = ${SYSTEM_ID} AND status = 'pending' AND type = ${t}
+    WHERE system_id = ${systemId} AND status = 'pending' AND type = ${t}
     LIMIT 1
   `) as unknown as Array<unknown>;
   return rows.length > 0;

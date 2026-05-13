@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import { getRecentReadings } from "@/lib/db";
+import { systemIdFromRequest } from "@/lib/system-ctx";
 
 export const maxDuration = 15;
 
 export async function GET(req: Request) {
+  const systemId = systemIdFromRequest(req);
   const { searchParams } = new URL(req.url);
   const hours = Math.max(1, Math.min(24 * 30, Number(searchParams.get("hours") || 24)));
   const limit = Math.max(10, Math.min(2000, Number(searchParams.get("limit") || 500)));
   try {
-    const readings = await getRecentReadings(hours, limit);
+    const readings = await getRecentReadings(hours, limit, systemId);
     return NextResponse.json({
+      system_id: systemId,
       readings: readings.map((r) => ({
         timestamp: r.ts.toISOString(),
         ph: r.ph,

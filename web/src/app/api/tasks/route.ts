@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getPendingTasks, getTasksByStatus } from "@/lib/db";
+import { systemIdFromRequest } from "@/lib/system-ctx";
 
 export const maxDuration = 15;
 
 export async function GET(req: Request) {
+  const systemId = systemIdFromRequest(req);
   const { searchParams } = new URL(req.url);
   const status = (searchParams.get("status") || "pending") as
     | "pending"
@@ -12,8 +14,11 @@ export async function GET(req: Request) {
     | "expired";
   try {
     const tasks =
-      status === "pending" ? await getPendingTasks() : await getTasksByStatus(status);
+      status === "pending"
+        ? await getPendingTasks(systemId)
+        : await getTasksByStatus(status, systemId);
     return NextResponse.json({
+      system_id: systemId,
       tasks: tasks.map((t) => ({
         id: t.id,
         system_id: t.system_id,

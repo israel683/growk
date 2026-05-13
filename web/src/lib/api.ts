@@ -5,9 +5,18 @@ import type {
   WaterReading,
   SystemProfile,
 } from "./types";
+import { getActiveSystem } from "./system";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8765";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN;
+
+function withSystem(path: string): string {
+  if (typeof window === "undefined") return path;
+  const sys = getActiveSystem();
+  if (!sys || sys === "default") return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}system=${encodeURIComponent(sys)}`;
+}
 
 function headers(): HeadersInit {
   const h: HeadersInit = { "Content-Type": "application/json" };
@@ -16,7 +25,8 @@ function headers(): HeadersInit {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const fullPath = withSystem(path);
+  const res = await fetch(`${API_URL}${fullPath}`, {
     ...init,
     headers: { ...headers(), ...(init?.headers || {}) },
     cache: "no-store",
@@ -64,4 +74,58 @@ export async function updateSystemProfile(patch: Partial<SystemProfile>) {
     method: "POST",
     body: JSON.stringify(patch),
   });
+}
+
+// === Systems CRUD ===
+
+export type SystemSummary = {
+  id: string;
+  name: string;
+  status: "active" | "paused" | "archived";
+  created_at: string;
+  archived_at: string | null;
+  crop_type: string;
+  growth_stage: string;
+  reservoir_liters: number;
+  system_type: string;
+  location: string;
+  outdoor: boolean;
+  ai_cycle_minutes: number;
+  tuya_device_id: string | null;
+  notes: string | null;
+};
+
+export async function listSystems(includeArchived = false) {
+  const path = `/api/systems${includeArchived ? "?archived=1" : ""}`;
+  const res = await fetch(`${API_URL}${path}`, { headers: headers(), cache: "no-store" });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json() as Promise<{ systems: SystemSummary[] }>;
+}
+
+export async function createSystem(input: {
+  name: string;
+  id?: string;
+  crop_type?: string;
+  growth_stage?: string;
+  reservoir_liters?: number;
+  notes?: string;
+}) {
+  const res = await fetch(`${API_URL}/api/systems`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(`${res.status}: ${await res.text()}`);
+  }
+  return res.json() as Promise<{ system: SystemSummary }>;
+}
+
+export async function archiveSystem(id: string) {
+  const res = await fetch(`${API_URL}/api/systems/${id}`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json() as Promise<{ ok: true }>;
 }

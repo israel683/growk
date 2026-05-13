@@ -4,6 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { getActiveSystem } from "@/lib/system";
 
 const STARTERS = [
   "מה מצב הצמחים עכשיו?",
@@ -13,8 +14,16 @@ const STARTERS = [
 ];
 
 export default function ChatPage() {
+  const [activeSystem, setActiveSystemState] = useState<string>("default");
+  useEffect(() => {
+    setActiveSystemState(getActiveSystem());
+  }, []);
+
   const { messages, sendMessage, status, error, regenerate } = useChat({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      body: () => ({ system: getActiveSystem() }),
+    }),
   });
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);

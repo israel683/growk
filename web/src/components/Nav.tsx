@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SystemSwitcher } from "./SystemSwitcher";
 
 const LINKS = [
   { href: "/", label: "שיחה" },
@@ -17,7 +18,7 @@ export function Nav() {
         <Link href="/" className="font-bold text-base">
           GrowK
         </Link>
-        <ul className="flex gap-4 text-sm">
+        <ul className="flex gap-4 text-sm flex-1">
           {LINKS.map((l) => {
             const active = pathname === l.href;
             return (
@@ -36,6 +37,7 @@ export function Nav() {
             );
           })}
         </ul>
+        <SystemSwitcher />
       </div>
     </nav>
   );

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { completeTask } from "@/lib/db";
+import { systemIdFromRequest } from "@/lib/system-ctx";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const systemId = systemIdFromRequest(req);
   const taskId = Number(id);
   if (!Number.isFinite(taskId)) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
@@ -14,6 +16,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   } catch {
     // empty body is fine
   }
-  await completeTask(taskId, response);
+  await completeTask(taskId, response, systemId);
   return NextResponse.json({ ok: true });
 }

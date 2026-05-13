@@ -101,12 +101,12 @@ async function signedGet(cfg: TuyaConfig, path: string): Promise<unknown> {
   return r.json();
 }
 
-export async function readTuyaSensor(): Promise<TuyaReading> {
+export async function readTuyaSensor(opts: { deviceId?: string } = {}): Promise<TuyaReading> {
   const cfg: TuyaConfig = {
     accessId: required("TUYA_ACCESS_ID"),
     accessSecret: required("TUYA_ACCESS_SECRET"),
     endpoint: process.env.TUYA_API_ENDPOINT || "https://openapi.tuyaeu.com",
-    deviceId: required("TUYA_SENSOR_DEVICE_ID"),
+    deviceId: opts.deviceId || required("TUYA_SENSOR_DEVICE_ID"),
   };
 
   // Online status (informational)

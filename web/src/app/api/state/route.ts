@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
-import { getRecentReadings, getRecentDecisions, getPendingTasks, SYSTEM_ID } from "@/lib/db";
+import { getRecentReadings, getRecentDecisions, getPendingTasks, getSystem } from "@/lib/db";
+import { systemIdFromRequest } from "@/lib/system-ctx";
 
 export const maxDuration = 15;
 
-export async function GET() {
+export async function GET(req: Request) {
+  const systemId = systemIdFromRequest(req);
   try {
-    const [readings, decisions, pending] = await Promise.all([
-      getRecentReadings(24, 1),
-      getRecentDecisions(1),
-      getPendingTasks(),
+    const [readings, decisions, pending, sys] = await Promise.all([
+      getRecentReadings(24, 1, systemId),
+      getRecentDecisions(1, systemId),
+      getPendingTasks(systemId),
+      getSystem(systemId),
     ]);
+    if (!sys) {
+      return NextResponse.json({ error: `system "${systemId}" not found` }, { status: 404 });
+    }
     const current = readings.length > 0 ? readings[readings.length - 1] : null;
     const last = decisions[0] || null;
 
@@ -19,7 +25,7 @@ export async function GET() {
     return NextResponse.json({
       agent: {
         cycle_count: decisions.length,
-        next_ai_seconds: 3600,
+        next_ai_seconds: sys.ai_cycle_minutes * 60,
         mock_mode: false,
         model: process.env.CHAT_MODEL || "claude-sonnet-4-6",
       },
@@ -53,14 +59,19 @@ export async function GET() {
         : null,
       pending_tasks: { total: pending.length, by_priority: priorityCounts },
       system_profile: {
-        system_type: process.env.SYSTEM_TYPE || "nft_wall_mounted",
-        reservoir_liters: Number(process.env.RESERVOIR_LITERS || 60),
-        crop_type: process.env.CROP_TYPE || "lettuce",
-        growth_stage: process.env.GROWTH_STAGE || "vegetative",
-        location: process.env.LOCATION || "Tel Aviv, Israel",
-        outdoor: true,
+        system_type: sys.system_type,
+        reservoir_liters: sys.reservoir_liters,
+        crop_type: sys.crop_type,
+        growth_stage: sys.growth_stage,
+        location: sys.location,
+        outdoor: sys.outdoor,
       },
-      system_id: SYSTEM_ID,
+      system: {
+        id: sys.id,
+        name: sys.name,
+        status: sys.status,
+      },
+      system_id: sys.id,
     });
   } catch (e) {
     return NextResponse.json(
