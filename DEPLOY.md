@@ -2,6 +2,11 @@
 
 End-to-end deploy of the Python agent and the Next.js dashboard to the cloud.
 
+**Live URLs (POC, as of 2026-05-13):**
+- Dashboard: https://growk-one.vercel.app
+- Agent API: Railway (private — never link from public copy)
+- Repo: https://github.com/israel683/growk
+
 | Component | Platform | Reason |
 |---|---|---|
 | Python agent (loop + FastAPI) | **Railway** | container-based, always-on, persistent volume for SQLite |
@@ -67,6 +72,11 @@ git push -u origin main
    GROWK_API_HOST=0.0.0.0
    GROWK_API_TOKEN=<generate a random string — used for auth from Vercel>
    GROWK_CORS_ORIGINS=https://<your-vercel-domain>.vercel.app
+   # Optional: also allow Vercel preview/branch URLs that change per commit.
+   # The regex below matches both the production alias and per-deploy URLs of
+   # YOUR project — replace "<vercel-org-slug>" with what you see in URLs like
+   # growk-git-main-<vercel-org-slug>.vercel.app
+   GROWK_CORS_ORIGIN_REGEX=https://(growk-one|growk-[a-z0-9-]+-<vercel-org-slug>)\.vercel\.app
    DB_PATH=/app/db_data/growk.db
    ```
    The `PORT` variable is injected by Railway automatically.
