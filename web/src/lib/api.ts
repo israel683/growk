@@ -129,3 +129,27 @@ export async function archiveSystem(id: string) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json() as Promise<{ ok: true }>;
 }
+
+export async function patchSystem(
+  id: string,
+  patch: Partial<{
+    name: string;
+    status: "active" | "paused" | "archived";
+    crop_type: string;
+    growth_stage: string;
+    reservoir_liters: number;
+    system_type: string;
+    location: string;
+    outdoor: boolean;
+    ai_cycle_minutes: number;
+    notes: string | null;
+  }>
+) {
+  const res = await fetch(`${API_URL}/api/systems/${id}`, {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json() as Promise<{ system: SystemSummary; transition: string | null }>;
+}

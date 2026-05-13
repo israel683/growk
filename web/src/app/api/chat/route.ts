@@ -94,8 +94,23 @@ export async function POST(req: Request) {
     decisionsForFreshCheck.length === 0;
 
   let contextLine = sys
-    ? `\n\n# Active system\n- id: ${sys.id}\n- name: ${sys.name}\n- crop: ${sys.crop_type}\n- growth stage: ${sys.growth_stage}\n- reservoir: ${sys.reservoir_liters}L\n- location: ${sys.location}`
+    ? `\n\n# Active system\n- id: ${sys.id}\n- name: ${sys.name}\n- status: ${sys.status}\n- crop: ${sys.crop_type}\n- growth stage: ${sys.growth_stage}\n- reservoir: ${sys.reservoir_liters}L\n- location: ${sys.location}`
     : `\n\n# Active system\n- id: ${systemId} (not found in DB)`;
+
+  if (sys?.status === "paused") {
+    contextLine += `
+
+# 🛠 MAINTENANCE MODE
+
+This system is currently paused. The autonomous cycle is OFF — no sensor polls, no dosing decisions, no scheduled actions happen while in this state.
+
+**Your behavior while paused:**
+- Do NOT propose actions (no proposeAction calls; no dose suggestions).
+- Do NOT call getCurrentState as if monitoring — the data is frozen.
+- If the grower asks how things are, gently remind them the system is in maintenance and ask what they're doing or what changed.
+- If the grower describes changes they made, use \`updateSystem\` to persist relevant info (e.g. new location, new crop, new notes) AND ask one focused follow-up via askGrower when the change is consequential (e.g. moved the system → ask about sun direction; replaced sensor → ask which sensor and whether it was calibrated).
+- The grower releases maintenance via the UI button; you do not need to ask them to resume.`;
+  }
 
   if (isFreshSystem) {
     contextLine += `

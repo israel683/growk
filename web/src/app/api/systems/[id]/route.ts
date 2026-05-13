@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSystem, updateSystem, archiveSystem } from "@/lib/db";
+import { getSystem, updateSystem, archiveSystem, saveChatMessage } from "@/lib/db";
 
 export const maxDuration = 15;
 
@@ -34,9 +34,58 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       tuya_device_id: string | null;
       notes: string | null;
     }>;
+
+    // Capture pre-state so we can detect transitions worth narrating in the
+    // chat thread (e.g. paused → active = "resumed maintenance").
+    const before = await getSystem(id);
+    if (!before) return NextResponse.json({ error: "not found" }, { status: 404 });
+
     const updated = await updateSystem(id, body);
     if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
-    return NextResponse.json({ system: serialize(updated) });
+
+    const enteredMaintenance = before.status !== "paused" && updated.status === "paused";
+    const exitedMaintenance = before.status === "paused" && updated.status === "active";
+
+    if (enteredMaintenance) {
+      try {
+        await saveChatMessage({
+          systemId: id,
+          role: "assistant",
+          parts: [
+            {
+              type: "text",
+              text: "🛠 המערכת עברה למצב תחזוקה. אני מפסיק לקבל החלטות אוטונומיות ואת המינונים עד שתשחרר אותי. אם תרצה — עדכן אותי בצ'אט מה אתה עושה, ואני אזכור.",
+            },
+          ],
+          source: "system",
+          status: "paused",
+        });
+      } catch (e) {
+        console.error("[maint-enter] chat push failed:", e);
+      }
+    } else if (exitedMaintenance) {
+      try {
+        await saveChatMessage({
+          systemId: id,
+          role: "assistant",
+          parts: [
+            {
+              type: "text",
+              text: "▶ ברוך הבא בחזרה. סיימת תחזוקה. ספר לי בקצרה מה שינית במערכת — אני שואל כדי שאוכל להחליט נכון על המשך. (גם דברים שנראים קטנים: זווית שמש, כיול חיישן, חומר חדש בדישון...)",
+            },
+          ],
+          source: "system",
+          status: "active",
+        });
+      } catch (e) {
+        console.error("[maint-exit] chat push failed:", e);
+      }
+    }
+
+    return NextResponse.json({
+      system: serialize(updated),
+      transition: enteredMaintenance ? "entered_maintenance" : exitedMaintenance ? "exited_maintenance" : null,
+    });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
