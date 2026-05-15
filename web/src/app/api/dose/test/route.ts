@@ -21,7 +21,10 @@ function authorized(req: Request): boolean {
   return Boolean(cronSecret && auth === `Bearer ${cronSecret}`);
 }
 
-const MAX_TEST_ML = 2;
+// Raised to 20ml so priming/calibration runs (typical tube prime is ~8ml +
+// a few ml to see drip at the end of the tube) can complete in one shot.
+// Hardware safety: still well under SafetyController's 50ml/single-dose limit.
+const MAX_TEST_ML = 20;
 
 export async function POST(req: Request) {
   if (!authorized(req)) {
