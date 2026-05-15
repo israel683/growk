@@ -69,10 +69,15 @@ export async function POST(req: Request) {
     const did = bindData.devices?.[0]?.did;
     if (!did) return NextResponse.json({ error: "no device bound" }, { status: 404 });
 
-    // Build attrs: master + (optionally) all channels to specified state.
-    const attrs: Record<string, boolean> = { switch: on };
+    // Build attrs: master + (optionally) all channels + ALL TIMERS to OFF.
+    // The device firmware re-enables Timer*ON flags on its own even when
+    // CH*SWTime is empty; explicitly setting them false stops any internal
+    // scheduled cycle.
+    const attrs: Record<string, boolean | number> = { switch: on };
     if (alsoChannels) {
-      for (let i = 1; i <= 5; i++) attrs[`channe${i}`] = false; // always off for safety
+      for (let i = 1; i <= 8; i++) attrs[`channe${i}`] = false;
+      for (let i = 1; i <= 8; i++) attrs[`Timer${i}ON`] = false;
+      attrs.CALSW = false;
     }
 
     const ctlRes = await fetch(REGION_URLS[region].control(did), {
