@@ -179,6 +179,14 @@ async function setChannel(
 ): Promise<{ ok: boolean; status?: number; body?: string }> {
   const s = await ensureSession();
   const attrName = `channe${physicalChannel}`;
+  // On a fresh / reset device the master `switch` attribute defaults to 0,
+  // which silently disables ALL channel toggles even though the API returns
+  // 200. Co-send `switch: true` on every ON command (idempotent — no-op if
+  // already on). OFF commands don't touch the master so it stays enabled
+  // between doses in the same cycle.
+  const attrs = on
+    ? { switch: true, [attrName]: true }
+    : { [attrName]: false };
   const r = await fetch(REGION_URLS[s.region].control(s.deviceId), {
     method: "POST",
     headers: {
@@ -187,7 +195,7 @@ async function setChannel(
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify({ attrs: { [attrName]: on } }),
+    body: JSON.stringify({ attrs }),
   });
 
   if (r.ok) return { ok: true, status: r.status };
