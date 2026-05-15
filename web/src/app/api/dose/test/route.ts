@@ -62,7 +62,24 @@ export async function POST(req: Request) {
   }
 
   const started = Date.now();
-  const result = await doseChannel(channel, amountMl, "manual calibration test");
+  let result;
+  try {
+    result = await doseChannel(channel, amountMl, "manual calibration test");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[dose/test] doseChannel threw:", msg);
+    return NextResponse.json(
+      {
+        ok: false,
+        channel,
+        physical_channel: CHANNEL_MAP[channel],
+        amount_ml: amountMl,
+        error: `doseChannel threw: ${msg}`,
+        wall_ms: Date.now() - started,
+      },
+      { status: 200 }
+    );
+  }
 
   // Log to dosing_actions so /decisions shows the calibration run alongside
   // real AI-driven doses. system_id from the request (?system= or default).
