@@ -13,8 +13,32 @@ import {
   updateSystem,
   DEFAULT_SYSTEM_ID,
 } from "./db";
+import { getDosingConfig, allChannelKeys, type DosingConfig } from "./dosing-config";
+import { getProfile, listProfiles } from "./fertilizer-profiles";
+import { getPrimingState, PRIMING_ML_PER_CHANNEL } from "./priming";
 
-export function buildAgentTools(systemId: string = DEFAULT_SYSTEM_ID) {
+export async function buildAgentTools(systemId: string = DEFAULT_SYSTEM_ID) {
+  // Resolve the per-system dosing layout once per chat request so all tools
+  // describe the SAME universe of channels to the model.  If the system has
+  // no persisted config the helper falls back to the legacy default.
+  const dosingConfig: DosingConfig = await getDosingConfig(systemId);
+  const channelKeys = allChannelKeys(dosingConfig);
+  const profile = getProfile(dosingConfig.profile_id);
+
+  // Build a human-readable list of channel keys with their role so the model
+  // can pick the right one in proposeAction.
+  const channelDescriptions = channelKeys
+    .map((k) => {
+      const a = dosingConfig.assignments[k];
+      return `${k} (role=${a?.role ?? "?"})`;
+    })
+    .join(", ") || "(none configured)";
+  const profileBlurb = profile
+    ? `Installed: ${profile.name_en} (${profile.vendor}); components ${profile.components
+        .map((c) => c.key)
+        .join("/")}.`
+    : "No fertilizer profile attached.";
+
   return {
     getCurrentState: tool({
       description:
@@ -135,15 +159,27 @@ export function buildAgentTools(systemId: string = DEFAULT_SYSTEM_ID) {
 
     proposeAction: tool({
       description:
-        "Propose a dosing action by creating a 'dose_approval' Human Task for the grower to confirm. This does NOT execute the dose. Use when, based on the data, you'd recommend dosing but want explicit human approval first. Channels reflect the Terra Aquatica Tri Part setup: micro/grow/bloom (NPK) + ph_up. There is NO pH Down channel — high pH must go through a manual_action human task instead.",
+        "Propose a dosing action by creating a 'dose_approval' Human Task for the grower to confirm. This does NOT execute the dose. Use when, based on the data, you'd recommend dosing but want explicit human approval first. " +
+        `Channels available on THIS system: ${channelDescriptions}. ${profileBlurb} ` +
+        "Channels not listed here do not exist on this rig — for missing pH directions or missing components, raise a manual_action human task instead.",
       inputSchema: z.object({
-        channel: z.enum(["micro", "grow", "bloom", "ph_up"]),
+        // Zod free-string + runtime validation against the per-system config.
+        // We don't lock the enum at schema time so each system's chat can
+        // address its own channel set without a code change.
+        channel: z.string().describe(`One of: ${channelKeys.join(", ") || "(none)"}`),
         amount_ml: z.number().min(0.1).max(50),
         title_he: z.string().describe("Short Hebrew title for the dashboard"),
         reason_he: z.string().describe("Hebrew explanation for the grower"),
         reason_en: z.string().describe("English technical reason"),
       }),
       execute: async (params) => {
+        if (!channelKeys.includes(params.channel)) {
+          return {
+            kind: "rejected",
+            reason: `Channel '${params.channel}' is not configured on this system. ` +
+              `Available: ${channelKeys.join(", ") || "(none)"}.`,
+          };
+        }
         const taskId = await createHumanTask(
           {
             type: "dose_approval",
@@ -222,6 +258,121 @@ export function buildAgentTools(systemId: string = DEFAULT_SYSTEM_ID) {
       // the grower's reply as the next message. The execute return is just so
       // the tool resolves cleanly in the model loop.
       execute: async (params) => ({ rendered: true, ...params }),
+    }),
+
+    configureFertilizer: tool({
+      description:
+        "Persist this system's dosing configuration: which fertilizer profile is installed (Terra Aquatica TriPart, AD HaMushlam, etc.) and which physical Jebao channel carries each bottle (nutrient components + pH up/down). " +
+        "Call this when the grower describes a new install or changes bottles. The grower may specify only some channels — channels left out get removed from the config. " +
+        `Known profiles: ${listProfiles().map((p) => `${p.id} (${p.name_en})`).join("; ")}. ` +
+        "Each assignment is { physical: 1..5, role: 'fertilizer'|'ph_up'|'ph_down', component_key?: string }. " +
+        "For 'fertilizer' role, component_key must be one of the chosen profile's component keys.",
+      inputSchema: z.object({
+        profile_id: z
+          .string()
+          .describe("Fertilizer profile id, e.g. 'terra_aquatica_tripart' or 'ad_hamushlam'"),
+        assignments: z
+          .array(
+            z.object({
+              key: z.string().describe(
+                "Channel role identifier — fertilizer component key (e.g. 'micro') OR 'ph_up' / 'ph_down'"
+              ),
+              physical: z.number().int().min(1).max(8),
+              role: z.enum(["fertilizer", "ph_up", "ph_down"]),
+              component_key: z.string().optional(),
+            })
+          )
+          .describe("One entry per physically-plumbed channel. Omit channels that aren't installed."),
+      }),
+      execute: async (params) => {
+        const prof = getProfile(params.profile_id);
+        if (!prof) {
+          return {
+            ok: false,
+            error: `Unknown profile_id '${params.profile_id}'. Known: ${listProfiles().map((p) => p.id).join(", ")}.`,
+          };
+        }
+        const componentKeys = new Set(prof.components.map((c) => c.key));
+        const assignments: Record<string, unknown> = {};
+        const errors: string[] = [];
+        for (const a of params.assignments) {
+          if (a.role === "fertilizer") {
+            const compKey = a.component_key ?? a.key;
+            if (!componentKeys.has(compKey)) {
+              errors.push(
+                `assignment key '${a.key}': component '${compKey}' not in profile '${prof.id}' (components: ${[...componentKeys].join(", ")})`
+              );
+              continue;
+            }
+            assignments[a.key] = {
+              role: "fertilizer",
+              component_key: compKey,
+              physical: a.physical,
+            };
+          } else {
+            assignments[a.key] = { role: a.role, physical: a.physical };
+          }
+        }
+        if (errors.length > 0) {
+          return { ok: false, errors };
+        }
+        const dosing_config = { profile_id: prof.id, assignments };
+        await updateSystem(systemId, { dosing_config });
+        return {
+          ok: true,
+          profile: prof.id,
+          channels: Object.keys(assignments),
+          note: "Dosing config saved. Future doses + safety checks use this layout.",
+        };
+      },
+    }),
+
+    getPrimingStatus: tool({
+      description:
+        "Show which feed-tube channels on this system have been primed yet. Every channel has ~8ml of dead-volume in its feed tube; the FIRST dose on an unprimed channel doesn't change the reservoir. Use this when the grower asks 'is the system ready to dose' or right before proposing the first nutrient dose on a fresh install.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const state = await getPrimingState(systemId);
+        const out: Array<{
+          channel: string;
+          primed: boolean;
+          last_event_at: string | null;
+          ml_since_last_event: number;
+        }> = [];
+        for (const key of channelKeys) {
+          const c = state.channels[key];
+          out.push({
+            channel: key,
+            primed: c?.primed ?? false,
+            last_event_at: c?.last_event_at ? c.last_event_at.toISOString() : null,
+            ml_since_last_event: c?.ml_since_last_event ?? 0,
+          });
+        }
+        return {
+          system_id: systemId,
+          default_priming_ml: PRIMING_ML_PER_CHANNEL,
+          channels: out,
+        };
+      },
+    }),
+
+    listFertilizerProfiles: tool({
+      description:
+        "List all available fertilizer profiles (brands/product lines) the agronomist can choose between when configuring a system. Use during onboarding or when the grower asks what's supported.",
+      inputSchema: z.object({}),
+      execute: async () => ({
+        profiles: listProfiles().map((p) => ({
+          id: p.id,
+          name_he: p.name_he,
+          name_en: p.name_en,
+          vendor: p.vendor,
+          components: p.components.map((c) => ({
+            key: c.key,
+            label_he: c.label_he,
+            npk: c.npk,
+          })),
+        })),
+      }),
     }),
 
     updateSystem: tool({

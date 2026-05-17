@@ -4,6 +4,7 @@ import {
   convertToModelMessages,
   stepCountIs,
   type UIMessage,
+  type ModelMessage,
 } from "ai";
 import { buildAgentTools } from "@/lib/agent-tools";
 import {
@@ -20,6 +21,16 @@ const anthropic = createAnthropic({
   apiKey: process.env.GROWK_ANTHROPIC_KEY || process.env.ANTHROPIC_API_KEY,
   baseURL: "https://api.anthropic.com/v1",
 });
+
+// Anthropic extended cache TTL beta — keeps the system + tools cache hot for
+// 1h between turns, matching what the autonomous brain already uses.
+const CACHE_TTL_BETA = "extended-cache-ttl-2025-04-11";
+
+// Hard cap on conversation history sent to the model.  The DB retains the
+// full thread (paged in the UI); this only bounds what we pay tokens for.
+// 40 turns ≈ ~20 user / 20 assistant pairs — plenty of recent context
+// without unbounded growth.
+const MAX_CHAT_TURNS = 40;
 
 const BASE_SYSTEM_PROMPT = `You are GrowK — a master agronomist who runs hydroponic systems on behalf of the grower. You are not a dashboard. You are a knowledgeable companion who tends the plants 24/7.
 
@@ -74,8 +85,9 @@ export async function POST(req: Request) {
   const messages = body.messages;
   const systemId = (body.system || DEFAULT_SYSTEM_ID).trim() || DEFAULT_SYSTEM_ID;
 
-  // Build per-request tool set bound to this system
-  const tools = buildAgentTools(systemId);
+  // Build per-request tool set bound to this system.  Async because it reads
+  // the system's DosingConfig to scope channel-aware tool descriptions.
+  const tools = await buildAgentTools(systemId);
 
   // Fetch system context so we can tell Claude which system this is.
   // Detect "fresh placeholder" — name == default sentinel AND no readings AND
@@ -150,12 +162,37 @@ DO NOT skip askGrower. The whole point of this UX is clickable stacked-question 
     }
   }
 
+  // Trim conversation history to the most recent MAX_CHAT_TURNS turns.  The
+  // DB still holds the full thread for replay on refresh; we just don't pay
+  // input tokens for ancient context every turn.  Trimming from the front
+  // keeps the most recent (most relevant) exchange.
+  const trimmedMessages =
+    messages.length > MAX_CHAT_TURNS
+      ? messages.slice(-MAX_CHAT_TURNS)
+      : messages;
+
+  // Inject the system prompt as a message (not via streamText's `system`
+  // prop) so we can attach Anthropic cacheControl to it — the `system` prop
+  // is plain-string only.  Same pattern brain.ts uses for the autonomous
+  // cycle's cached SYSTEM_PROMPT.
+  const convertedHistory = await convertToModelMessages(trimmedMessages);
+  const modelMessages: ModelMessage[] = [
+    {
+      role: "system",
+      content: BASE_SYSTEM_PROMPT + contextLine,
+      providerOptions: {
+        anthropic: { cacheControl: { type: "ephemeral", ttl: "1h" } },
+      },
+    },
+    ...convertedHistory,
+  ];
+
   const result = streamText({
     model: anthropic(modelId),
-    system: BASE_SYSTEM_PROMPT + contextLine,
-    messages: await convertToModelMessages(messages),
+    messages: modelMessages,
     tools,
     stopWhen: stepCountIs(8),
+    headers: { "anthropic-beta": CACHE_TTL_BETA },
   });
 
   return result.toUIMessageStreamResponse({

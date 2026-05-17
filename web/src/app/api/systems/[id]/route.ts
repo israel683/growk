@@ -33,6 +33,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       ai_cycle_minutes: number;
       tuya_device_id: string | null;
       notes: string | null;
+      dosing_config: Record<string, unknown> | null;
     }>;
 
     // Capture pre-state so we can detect transitions worth narrating in the

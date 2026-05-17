@@ -19,15 +19,19 @@ import {
   getRecentReadings,
   getRecentActions,
   getPendingTasks,
+  getRecentDecisions,
   saveDecision,
   saveAction,
   createHumanTask,
   expireOldTasks,
   listSystems,
   saveChatMessage,
+  setNextCheckAt,
 } from "@/lib/db";
 import { analyzeAndDecide } from "@/lib/brain";
-import { doseChannel } from "@/lib/devices/jebao";
+import { doseChannelByPhysical } from "@/lib/devices/jebao";
+import { getDosingConfig } from "@/lib/dosing-config";
+import { evaluateCycleGate, CYCLE_GATE } from "@/lib/cycle-gate";
 
 export const maxDuration = 60;
 
@@ -66,6 +70,69 @@ export async function GET(req: Request) {
         const recentActions = await getRecentActions(24, sys.id);
         const pendingTasks = await getPendingTasks(sys.id);
 
+        // -------------------------------------------------------------------
+        // Cycle gate — decide whether this tick is worth a Claude call.
+        // -------------------------------------------------------------------
+        const lastDecisions = await getRecentDecisions(1, sys.id);
+        const lastDecision = lastDecisions[0] ?? null;
+        // The reference reading is the one closest in time to the last
+        // decision; readings is ordered chronologically so we walk backwards.
+        let referenceReading = null;
+        if (lastDecision) {
+          const lastTs = lastDecision.ts.getTime();
+          for (let i = recent.length - 1; i >= 0; i--) {
+            if (recent[i].ts.getTime() <= lastTs) {
+              referenceReading = recent[i];
+              break;
+            }
+          }
+        }
+        const highPriCount = pendingTasks.filter(
+          (t) => t.priority === "high" || t.priority === "urgent"
+        ).length;
+        const gate = evaluateCycleGate({
+          current,
+          referenceReading,
+          nextCheckAt: sys.next_check_at,
+          pendingHighPriorityCount: highPriCount,
+          lastDecisionStatus: lastDecision?.status ?? null,
+        });
+
+        if (!gate.run_llm) {
+          // SKIP path — record a zero-token decision row so the activity log
+          // still shows we were alive, but don't push a chat message (would
+          // be noise) and don't burn Claude tokens.
+          const skipDecisionId = await saveDecision(
+            {
+              status: "healthy",
+              analysis: `[gate-skip] ${gate.skip_reason}`,
+              message: "",
+              raw_response: { gate_skipped: true, reason: gate.skip_reason },
+              tokens_input: 0,
+              tokens_output: 0,
+              cache_creation_tokens: 0,
+              cache_read_tokens: 0,
+            },
+            sys.id
+          );
+          const nextAt = new Date(Date.now() + gate.next_check_minutes * 60_000);
+          await setNextCheckAt(sys.id, nextAt);
+          results.push({
+            system_id: sys.id,
+            ok: true,
+            skipped: true,
+            skip_reason: gate.skip_reason,
+            decision_id: skipDecisionId,
+            next_check_at: nextAt.toISOString(),
+            duration_ms: Date.now() - sysStart,
+          });
+          continue;
+        }
+
+        // Resolve once per cycle so the brain + dose loop share one view of
+        // the rig's physical channel layout.
+        const dosingConfig = await getDosingConfig(sys.id);
+
         const decision = await analyzeAndDecide({
           current,
           recent,
@@ -85,6 +152,8 @@ export async function GET(req: Request) {
             reason: a.reason,
           })),
           pendingTasks,
+          dosingConfig,
+          systemId: sys.id,
         });
 
         const decisionId = await saveDecision(
@@ -118,7 +187,19 @@ export async function GET(req: Request) {
 
         const executed: Array<{ channel: string; amount_ml: number; success: boolean; error?: string }> = [];
         for (const cmd of decision.commands) {
-          const r = await doseChannel(cmd.channel, cmd.amount_ml, cmd.reason);
+          // Brain already validated cmd.channel exists in dosingConfig, so
+          // assignments[cmd.channel] is non-null at this point.
+          const phys = dosingConfig.assignments[cmd.channel]?.physical;
+          if (!phys) {
+            executed.push({
+              channel: cmd.channel,
+              amount_ml: cmd.amount_ml,
+              success: false,
+              error: `no physical channel mapped for '${cmd.channel}'`,
+            });
+            continue;
+          }
+          const r = await doseChannelByPhysical(phys, cmd.amount_ml, cmd.reason, cmd.channel);
           await saveAction(
             {
               channel: cmd.channel,
@@ -138,6 +219,16 @@ export async function GET(req: Request) {
             error: r.error,
           });
         }
+
+        // Honour Claude's `next_check_minutes` for the cycle gate.  Floored
+        // at CYCLE_GATE.min_skip_minutes when status=healthy so we don't
+        // re-engage on the next cron tick when Claude said "all good".
+        const claudeMin = Number(decision.next_check_minutes) || 60;
+        const floored =
+          decision.status === "healthy"
+            ? Math.max(claudeMin, CYCLE_GATE.min_skip_minutes)
+            : claudeMin;
+        await setNextCheckAt(sys.id, new Date(Date.now() + floored * 60_000));
 
         // Push a chat message so the grower sees this cycle in their thread
         // next time they open the conversation. The UI renders these as

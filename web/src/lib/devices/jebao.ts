@@ -31,24 +31,27 @@ const REGION_URLS = {
 
 type Region = keyof typeof REGION_URLS;
 
-// Channel mapping reflects the actual physical setup on this dosing controller:
-// Terra Aquatica Tri Part nutrient stack + pH UP only (no pH DOWN installed).
-// Channel 5 is physically wired but currently unused.
-export const CHANNEL_MAP: Record<
-  "micro" | "grow" | "bloom" | "ph_up",
-  number
-> = {
+// Legacy hardcoded mapping — kept for backward compatibility with code paths
+// that haven't been threaded through DosingConfig yet (e.g. CLI scripts,
+// older logs).  The authoritative source of channel layout is now the
+// per-system `dosing_config` JSONB; see lib/dosing-config.ts.
+//
+// New code should resolve the physical channel via `getDosingConfig(systemId)`
+// and pass it to `doseChannelByPhysical()` instead of indexing this map.
+export const CHANNEL_MAP: Record<string, number> = {
   micro: 1,  // Terra Aquatica Micro, NPK 5-0-1
   grow: 2,   // Terra Aquatica Grow,  NPK 3-1-6
   bloom: 3,  // Terra Aquatica Bloom, NPK 0-5-4
   ph_up: 4,  // pH Up (potassium hydroxide solution)
 };
 
-export const CHANNEL_LABELS_HE: Record<keyof typeof CHANNEL_MAP, string> = {
+export const CHANNEL_LABELS_HE: Record<string, string> = {
   micro: "Micro",
   grow: "Grow",
   bloom: "Bloom",
   ph_up: "pH Up",
+  ph_down: "pH Down",
+  ad_solution: "AD המושלם",
 };
 
 const FLOW_RATE_ML_PER_MIN = 50;
@@ -218,38 +221,53 @@ async function setChannel(
 
 export type DoseResult = {
   success: boolean;
-  channel: keyof typeof CHANNEL_MAP;
+  /** Logical channel key (e.g. "micro" / "ph_up" / "ad_solution"). */
+  channel: string;
+  /** Physical Jebao channel 1..5 that was actuated. */
+  physical_channel: number;
   amount_ml: number;
   runtime_seconds: number;
   error?: string;
 };
 
 /**
- * Dose: switch ON → wait the calculated runtime → switch OFF.
+ * Core dose primitive — operates on a known physical channel number.
+ * Callers who already have a DosingConfig (the brain, dose/test route, etc.)
+ * should use this directly to avoid the legacy CHANNEL_MAP fallback.
  *
  * Note: this is a synchronous-ish operation. The function awaits the full
  * runtime before returning. For Vercel Function timeouts (10s default,
  * 60s with `export const maxDuration = 60`), dose amounts up to ~50 ml
  * (=60s) are safe. Anything bigger gets capped by safety anyway.
  */
-export async function doseChannel(
-  channel: keyof typeof CHANNEL_MAP,
+export async function doseChannelByPhysical(
+  physical: number,
   amountMl: number,
-  reason: string
+  reason: string,
+  channelKey: string = `channe${physical}`
 ): Promise<DoseResult> {
-  const physical = CHANNEL_MAP[channel];
-  if (!physical) {
-    return { success: false, channel, amount_ml: amountMl, runtime_seconds: 0, error: "unmapped channel" };
+  if (!Number.isInteger(physical) || physical < 1 || physical > 8) {
+    return {
+      success: false,
+      channel: channelKey,
+      physical_channel: physical,
+      amount_ml: amountMl,
+      runtime_seconds: 0,
+      error: `invalid physical channel: ${physical}`,
+    };
   }
   const runtimeSeconds = (amountMl / FLOW_RATE_ML_PER_MIN) * 60;
 
-  console.log(`[jebao] dosing ${amountMl}ml on channe${physical} (${channel}) — ${runtimeSeconds.toFixed(2)}s · ${reason}`);
+  console.log(
+    `[jebao] dosing ${amountMl}ml on channe${physical} (${channelKey}) — ${runtimeSeconds.toFixed(2)}s · ${reason}`
+  );
 
   const onResp = await setChannel(physical, true);
   if (!onResp.ok) {
     return {
       success: false,
-      channel,
+      channel: channelKey,
+      physical_channel: physical,
       amount_ml: amountMl,
       runtime_seconds: runtimeSeconds,
       error: `switch ON failed (HTTP ${onResp.status ?? "?"}${onResp.body ? ": " + onResp.body.slice(0, 150) : ""})`,
@@ -263,7 +281,8 @@ export async function doseChannel(
     if (!offResp.ok) {
       return {
         success: false,
-        channel,
+        channel: channelKey,
+        physical_channel: physical,
         amount_ml: amountMl,
         runtime_seconds: runtimeSeconds,
         error: `CRITICAL: switch OFF failed — pump may be stuck on (HTTP ${offResp.status ?? "?"})`,
@@ -271,7 +290,39 @@ export async function doseChannel(
     }
   }
 
-  return { success: true, channel, amount_ml: amountMl, runtime_seconds: runtimeSeconds };
+  return {
+    success: true,
+    channel: channelKey,
+    physical_channel: physical,
+    amount_ml: amountMl,
+    runtime_seconds: runtimeSeconds,
+  };
+}
+
+/**
+ * Backward-compatible wrapper: takes a channel KEY ("micro"/"ph_up"/...) and
+ * resolves the physical channel via the legacy CHANNEL_MAP.  Use this only
+ * for code paths that don't yet have a per-system DosingConfig (CLI scripts,
+ * legacy callers).  New code should use `doseChannelByPhysical` after a
+ * `getDosingConfig(systemId)` lookup.
+ */
+export async function doseChannel(
+  channel: string,
+  amountMl: number,
+  reason: string
+): Promise<DoseResult> {
+  const physical = CHANNEL_MAP[channel];
+  if (!physical) {
+    return {
+      success: false,
+      channel,
+      physical_channel: 0,
+      amount_ml: amountMl,
+      runtime_seconds: 0,
+      error: `unmapped channel '${channel}' — pass a known key or use doseChannelByPhysical`,
+    };
+  }
+  return doseChannelByPhysical(physical, amountMl, reason, channel);
 }
 
 function required(name: string): string {

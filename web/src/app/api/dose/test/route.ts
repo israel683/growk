@@ -9,9 +9,10 @@
  * so it shows up in /decisions for traceability.
  */
 import { NextResponse } from "next/server";
-import { doseChannel, CHANNEL_MAP } from "@/lib/devices/jebao";
+import { doseChannelByPhysical } from "@/lib/devices/jebao";
 import { saveAction } from "@/lib/db";
 import { systemIdFromRequest } from "@/lib/system-ctx";
+import { getDosingConfig, allChannelKeys } from "@/lib/dosing-config";
 
 export const maxDuration = 30;
 
@@ -39,18 +40,33 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  const channel = String(body.channel || "").trim() as keyof typeof CHANNEL_MAP;
+  const channel = String(body.channel || "").trim();
   const amountMl = Number(body.amount_ml);
 
-  if (!(channel in CHANNEL_MAP)) {
+  // Resolve channel against the active system's DosingConfig.  Supports both
+  // logical keys ("micro" / "ph_up" / "ad_solution") and a raw physical
+  // override via `physical_channel` in the body for hardware-level testing.
+  const cfg = await getDosingConfig(systemId);
+  const bodyPhysical = Number((body as { physical_channel?: unknown }).physical_channel);
+  let physical: number | null = null;
+  let resolvedKey: string = channel;
+
+  if (Number.isInteger(bodyPhysical) && bodyPhysical >= 1 && bodyPhysical <= 8) {
+    physical = bodyPhysical;
+    resolvedKey = channel || `channe${bodyPhysical}`;
+  } else if (channel && cfg.assignments[channel]) {
+    physical = cfg.assignments[channel].physical;
+  } else {
     return NextResponse.json(
       {
-        error: `unknown channel '${channel}'`,
-        valid: Object.keys(CHANNEL_MAP),
+        error: `unknown channel '${channel}' for system '${systemId}'`,
+        valid_channels: allChannelKeys(cfg),
+        hint: "Pass a logical channel key from the system's dosing_config, or use `physical_channel: 1..5` for raw hardware testing.",
       },
       { status: 400 }
     );
   }
+
   if (!Number.isFinite(amountMl) || amountMl <= 0) {
     return NextResponse.json({ error: `invalid amount_ml: ${body.amount_ml}` }, { status: 400 });
   }
@@ -64,15 +80,15 @@ export async function POST(req: Request) {
   const started = Date.now();
   let result;
   try {
-    result = await doseChannel(channel, amountMl, "manual calibration test");
+    result = await doseChannelByPhysical(physical, amountMl, "manual calibration test", resolvedKey);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error("[dose/test] doseChannel threw:", msg);
+    console.error("[dose/test] doseChannelByPhysical threw:", msg);
     return NextResponse.json(
       {
         ok: false,
-        channel,
-        physical_channel: CHANNEL_MAP[channel],
+        channel: resolvedKey,
+        physical_channel: physical,
         amount_ml: amountMl,
         error: `doseChannel threw: ${msg}`,
         wall_ms: Date.now() - started,
@@ -86,7 +102,7 @@ export async function POST(req: Request) {
   try {
     await saveAction(
       {
-        channel,
+        channel: resolvedKey,
         amount_ml: amountMl,
         reason: result.success ? "manual calibration test" : `FAILED: ${result.error}`,
         success: result.success,
@@ -102,7 +118,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: result.success,
     channel: result.channel,
-    physical_channel: CHANNEL_MAP[channel],
+    physical_channel: result.physical_channel,
     amount_ml: result.amount_ml,
     runtime_seconds: result.runtime_seconds,
     error: result.error,
@@ -110,13 +126,21 @@ export async function POST(req: Request) {
   });
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const systemId = systemIdFromRequest(req);
+  const cfg = await getDosingConfig(systemId);
   return NextResponse.json({
-    channels: Object.entries(CHANNEL_MAP).map(([key, n]) => ({
+    system_id: systemId,
+    profile_id: cfg.profile_id,
+    channels: Object.entries(cfg.assignments).map(([key, a]) => ({
       key,
-      physical_channe: n,
+      role: a.role,
+      physical_channe: a.physical,
+      ...(a.role === "fertilizer" ? { component_key: a.component_key } : {}),
     })),
     max_ml: MAX_TEST_ML,
-    usage: "POST { channel: '<key>', amount_ml: <0..2> } with Bearer auth",
+    usage:
+      "POST { channel: '<key>', amount_ml: <0..20> } with Bearer auth. " +
+      "For raw hardware testing on an unconfigured rig: POST { physical_channel: 1..5, amount_ml: <n> }.",
   });
 }

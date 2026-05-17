@@ -145,6 +145,10 @@ export async function ensureSchema(): Promise<void> {
   await safeDdl(() => s`CREATE INDEX IF NOT EXISTS idx_chat_ts ON chat_messages(system_id, thread_id, ts)`);
 
   // First-class systems table — each row is an isolated project.
+  // `dosing_config` JSONB carries the per-system fertilizer profile + channel
+  // mapping (see lib/dosing-config.ts).  NULL means "use the legacy default
+  // (Terra Aquatica Tri Part + pH Up on 1/2/3/4)" — kept that way so the
+  // original POC row keeps working without a data migration.
   await safeDdl(() => s`
     CREATE TABLE IF NOT EXISTS systems (
       id                TEXT PRIMARY KEY,
@@ -160,15 +164,29 @@ export async function ensureSchema(): Promise<void> {
       outdoor           BOOLEAN NOT NULL DEFAULT TRUE,
       ai_cycle_minutes  INTEGER NOT NULL DEFAULT 60,
       tuya_device_id    TEXT,
-      notes             TEXT
+      notes             TEXT,
+      dosing_config     JSONB,
+      next_check_at     TIMESTAMPTZ
     )
   `);
 
-  // Auto-create the 'default' row so existing data has a parent.
+  // Additive migrations for rows that pre-date the newer columns.
+  await safeDdl(() => s`
+    ALTER TABLE systems ADD COLUMN IF NOT EXISTS dosing_config JSONB
+  `);
+  await safeDdl(() => s`
+    ALTER TABLE systems ADD COLUMN IF NOT EXISTS next_check_at TIMESTAMPTZ
+  `);
+
+  // Auto-create the 'default' row so existing data has a parent. The name
+  // is the onboarding-trigger sentinel "מערכת חדשה" — if the row gets
+  // recreated (e.g. after a manual wipe) the next chat session opens with
+  // the agronomist running the 6-question onboarding flow instead of
+  // silently inheriting stale defaults.
   await safeDdl(() => s`
     INSERT INTO systems (id, name, crop_type, growth_stage, reservoir_liters,
                          system_type, location, outdoor, tuya_device_id)
-    VALUES ('default', 'מערכת ראשית', ${process.env.CROP_TYPE || "lettuce"},
+    VALUES ('default', 'מערכת חדשה', ${process.env.CROP_TYPE || "lettuce"},
             ${process.env.GROWTH_STAGE || "vegetative"},
             ${Number(process.env.RESERVOIR_LITERS || 60)},
             ${process.env.SYSTEM_TYPE || "nft_wall_mounted"},
@@ -267,6 +285,20 @@ export type SystemRow = {
   ai_cycle_minutes: number;
   tuya_device_id: string | null;
   notes: string | null;
+  /**
+   * JSONB blob persisted in `systems.dosing_config`. Shape parsed by
+   * lib/dosing-config.ts — kept loose here so this layer stays schema-only.
+   * NULL means "fall back to the legacy default" (Terra Aquatica Tri Part).
+   */
+  dosing_config: Record<string, unknown> | null;
+  /**
+   * The earliest time the autonomous LLM cycle is allowed to invoke Claude
+   * for this system again.  Lives on the system row (not on decisions) so
+   * the cycle gate can SELECT it in one query.  NULL = "run on next cron
+   * tick".  Updated by the cycle handler after each LLM call based on the
+   * `next_check_minutes` Claude returned.
+   */
+  next_check_at: Date | null;
 };
 
 function rowToSystem(row: Record<string, unknown>): SystemRow {
@@ -285,7 +317,20 @@ function rowToSystem(row: Record<string, unknown>): SystemRow {
     ai_cycle_minutes: Number(row.ai_cycle_minutes),
     tuya_device_id: (row.tuya_device_id as string) ?? null,
     notes: (row.notes as string) ?? null,
+    dosing_config: (row.dosing_config as Record<string, unknown> | null) ?? null,
+    next_check_at: row.next_check_at ? new Date(row.next_check_at as string) : null,
   };
+}
+
+/**
+ * Persist the next-earliest time this system is allowed to invoke a full
+ * LLM cycle.  Called from the cron handler after each cycle (run-or-skipped)
+ * so the gate has a deterministic minimum spacing.
+ */
+export async function setNextCheckAt(systemId: string, when: Date): Promise<void> {
+  await ensureSchema();
+  const s = sql();
+  await s`UPDATE systems SET next_check_at = ${when.toISOString()} WHERE id = ${systemId}`;
 }
 
 export async function listSystems(includeArchived = false): Promise<SystemRow[]> {
@@ -316,13 +361,14 @@ export async function createSystem(input: {
   ai_cycle_minutes?: number;
   tuya_device_id?: string | null;
   notes?: string | null;
+  dosing_config?: Record<string, unknown> | null;
 }): Promise<SystemRow> {
   await ensureSchema();
   const s = sql();
   const rows = (await s`
     INSERT INTO systems (id, name, crop_type, growth_stage, reservoir_liters,
                          system_type, location, outdoor, ai_cycle_minutes,
-                         tuya_device_id, notes)
+                         tuya_device_id, notes, dosing_config)
     VALUES (
       ${input.id}, ${input.name},
       ${input.crop_type ?? "lettuce"},
@@ -333,7 +379,8 @@ export async function createSystem(input: {
       ${input.outdoor ?? true},
       ${input.ai_cycle_minutes ?? 60},
       ${input.tuya_device_id ?? null},
-      ${input.notes ?? null}
+      ${input.notes ?? null},
+      ${input.dosing_config ? JSON.stringify(input.dosing_config) : null}::jsonb
     )
     RETURNING *
   `) as unknown as Array<Record<string, unknown>>;
@@ -360,9 +407,18 @@ export async function updateSystem(
   if (patch.ai_cycle_minutes !== undefined) fields.push(["ai_cycle_minutes", patch.ai_cycle_minutes]);
   if (patch.tuya_device_id !== undefined) fields.push(["tuya_device_id", patch.tuya_device_id]);
   if (patch.notes !== undefined) fields.push(["notes", patch.notes]);
+  // dosing_config is JSONB → serialize and cast via SQL.  Handled outside the
+  // generic loop below because it needs the ::jsonb cast on the bind.
   for (const [k, v] of fields) {
     // The column name is constrained to the known list above so injection-safe.
     await s.query(`UPDATE systems SET ${k as string} = $1 WHERE id = $2`, [v, id]);
+  }
+  if (patch.dosing_config !== undefined) {
+    const blob = patch.dosing_config === null ? null : JSON.stringify(patch.dosing_config);
+    await s.query(
+      `UPDATE systems SET dosing_config = $1::jsonb WHERE id = $2`,
+      [blob, id]
+    );
   }
   return getSystem(id);
 }

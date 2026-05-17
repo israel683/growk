@@ -2,10 +2,28 @@
  * GrowK Safety Controller — the LAST LINE OF DEFENSE before any dose reaches
  * hardware. These limits are NOT negotiable by the AI.
  *
- * Ported from agent/safety.py.
+ * The controller is now per-system: it consults the system's DosingConfig
+ * (see lib/dosing-config.ts) to know which channels exist, and which roles
+ * (ph_up / ph_down / fertilizer) they fill.  pH-out-of-bounds responses
+ * branch on what's available:
+ *
+ *   - pH < min and ph_up exists      → allow only the ph_up channel
+ *   - pH < min and no ph_up          → block all dosing (manual fix required)
+ *   - pH > max and ph_down exists    → allow only the ph_down channel
+ *   - pH > max and no ph_down        → block all dosing (manual fix required)
+ *
+ * EC overruns block "fertilizer" role channels regardless of brand.
  */
-import { getRecentActions } from "./db";
+import { getRecentActions, DEFAULT_SYSTEM_ID } from "./db";
 import type { WaterReading } from "./db";
+import {
+  getDosingConfig,
+  type DosingConfig,
+  hasPhUp,
+  hasPhDown,
+  phUpKey,
+  phDownKey,
+} from "./dosing-config";
 
 export const SAFETY_LIMITS = {
   // pH absolute bounds — outside this range, only the corrective channel allowed
@@ -28,13 +46,12 @@ export const SAFETY_LIMITS = {
   max_sensor_age_seconds: 300,
 } as const;
 
-// Channels reflect the physical Terra Aquatica Tri Part setup on this rig.
-// No pH_down is installed — high pH must be handled via a human task.
-export type DoserChannel = "micro" | "grow" | "bloom" | "ph_up";
-
-// Nutrient channels = any of the Tri Part components. The agent should dose
-// them in ratio (see prompt-engine.ts for stage-specific ratios).
-export const NUTRIENT_CHANNELS: DoserChannel[] = ["micro", "grow", "bloom"];
+/**
+ * `DoserChannel` is now a free string — the universe of valid keys depends
+ * on the active system's DosingConfig.  Validation happens in
+ * `validateCommand` against the resolved config.
+ */
+export type DoserChannel = string;
 
 export type DosingCommand = {
   channel: DoserChannel;
@@ -50,11 +67,36 @@ export type SafetyValidation =
 /**
  * Validates a single dose command against current reading + recent dosing
  * history. Returns ok:true to allow, or ok:false with a reason to block.
+ *
+ * If `dosingConfig` is not provided, it's looked up for `systemId`.  Callers
+ * that already hold a config (the brain) should pass it to avoid an extra
+ * DB round-trip per validation.
  */
 export async function validateCommand(
   command: DosingCommand,
-  currentReading: WaterReading | null
+  currentReading: WaterReading | null,
+  opts: {
+    systemId?: string;
+    dosingConfig?: DosingConfig;
+  } = {}
 ): Promise<SafetyValidation> {
+  const systemId = opts.systemId ?? DEFAULT_SYSTEM_ID;
+  const cfg = opts.dosingConfig ?? (await getDosingConfig(systemId));
+
+  // 0. Channel must exist on this rig.
+  if (!cfg.assignments[command.channel]) {
+    return {
+      ok: false,
+      reason:
+        `Unknown channel '${command.channel}' on this system. ` +
+        `Configured: ${Object.keys(cfg.assignments).join(", ") || "(none)"}.`,
+    };
+  }
+  const assignment = cfg.assignments[command.channel];
+  const isFertilizer = assignment.role === "fertilizer";
+  const isPhUp = assignment.role === "ph_up";
+  const isPhDown = assignment.role === "ph_down";
+
   // 1. Sensor freshness
   if (currentReading === null) {
     return { ok: false, reason: "No sensor reading available — refusing to dose blind" };
@@ -67,30 +109,50 @@ export async function validateCommand(
     };
   }
 
-  // 2. pH absolute bounds
+  // 2. pH absolute bounds — branch on which corrective channels exist.
   if (currentReading.ph !== null) {
-    if (currentReading.ph < SAFETY_LIMITS.ph_min && command.channel !== "ph_up") {
-      return {
-        ok: false,
-        reason: `pH=${currentReading.ph.toFixed(2)} is critically low — only pH Up allowed`,
-      };
+    if (currentReading.ph < SAFETY_LIMITS.ph_min) {
+      if (!hasPhUp(cfg)) {
+        return {
+          ok: false,
+          reason:
+            `pH=${currentReading.ph.toFixed(2)} is critically low — no pH Up channel on this rig; ` +
+            `manual intervention required`,
+        };
+      }
+      if (!isPhUp) {
+        const k = phUpKey(cfg);
+        return {
+          ok: false,
+          reason: `pH=${currentReading.ph.toFixed(2)} is critically low — only ${k ?? "pH Up"} channel allowed`,
+        };
+      }
     }
-    // No pH Down channel on this rig — high pH blocks ALL dosing and must
-    // be resolved by the grower manually (the agent should also raise a
-    // human task in this case, handled upstream in the brain).
     if (currentReading.ph > SAFETY_LIMITS.ph_max) {
-      return {
-        ok: false,
-        reason: `pH=${currentReading.ph.toFixed(2)} is critically high — no pH Down on this rig; manual intervention required`,
-      };
+      if (!hasPhDown(cfg)) {
+        return {
+          ok: false,
+          reason:
+            `pH=${currentReading.ph.toFixed(2)} is critically high — no pH Down channel on this rig; ` +
+            `manual intervention required`,
+        };
+      }
+      if (!isPhDown) {
+        const k = phDownKey(cfg);
+        return {
+          ok: false,
+          reason: `pH=${currentReading.ph.toFixed(2)} is critically high — only ${k ?? "pH Down"} channel allowed`,
+        };
+      }
     }
   }
 
-  // 3. EC bounds — block nutrient (Micro/Grow/Bloom) dosing when EC exceeds max
+  // 3. EC bounds — block fertilizer-role doses when EC exceeds max.
+  // pH channels are allowed even at high EC (they correct pH, not feed).
   if (
     currentReading.ec !== null &&
     currentReading.ec > SAFETY_LIMITS.ec_max &&
-    NUTRIENT_CHANNELS.includes(command.channel)
+    isFertilizer
   ) {
     return {
       ok: false,
@@ -128,7 +190,7 @@ export async function validateCommand(
   }
 
   // 7+8. Rate limits — fetch recent successful doses from DB
-  const recent = await getRecentActions(2); // last 2 hours covers hourly + interval
+  const recent = await getRecentActions(2, systemId); // last 2 hours covers hourly + interval
   const sameChannel = recent.filter(
     (a) => a.channel === command.channel && a.success
   );

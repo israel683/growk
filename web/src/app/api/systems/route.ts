@@ -24,6 +24,7 @@ export async function GET(req: Request) {
         ai_cycle_minutes: s.ai_cycle_minutes,
         tuya_device_id: s.tuya_device_id,
         notes: s.notes,
+        dosing_config: s.dosing_config,
       })),
     });
   } catch (e) {

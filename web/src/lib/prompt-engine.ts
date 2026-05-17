@@ -8,6 +8,10 @@
  * (5min / 1h / 6h / 24h) so Claude reasons on real drift signal, not noise.
  */
 import type { WaterReading, HumanTask } from "./db";
+import type { DosingConfig } from "./dosing-config";
+import { hasPhUp, hasPhDown, nutrientKeys, phUpKey, phDownKey } from "./dosing-config";
+import type { FertilizerProfile } from "./fertilizer-profiles";
+import type { PrimingState } from "./priming";
 
 export const SYSTEM_PROMPT = `You are GrowK, the autonomous controller of a real, physical
 hydroponic system. Your decisions directly affect living plants. You operate with
@@ -95,14 +99,32 @@ Unknown crop → default to lettuce + create a \`question\` task.
 - **TDS:** ~EC × 0.5–0.7, ignore if EC present.
 - **Water temp:** the dominant outdoor variable — above 28°C reduces uptake; above 32°C → root death risk.
 
-# Dosing Math (60L reservoir)
+# Dosing Math (60L reservoir, calibrate to actual reservoir size)
 
-- **Nutrient A+B:** ~2–3 ml each raises EC by ~50 μS/cm. Always dose equally unless deficiency.
-- **pH down (phosphoric acid):** ~1 ml drops pH ~0.2–0.4. Start with 0.5 ml.
-- **pH up (potassium hydroxide):** similar. Start small.
-- **Supplement (Cal-Mag):** 1–2 ml when deficiency signs appear.
+- **Nutrients:** typical liquid concentrate ~2–3 ml raises EC by ~50 μS/cm on a 60L
+  reservoir. The exact ml→EC ratio depends on the installed FertilizerProfile —
+  the per-cycle prompt lists it under "Installed Fertilizer".
+- **pH down (e.g. phosphoric acid):** ~1 ml drops pH ~0.2–0.4. Start with 0.5 ml.
+- **pH up (e.g. potassium hydroxide):** similar magnitude in the other direction. Start small.
+- **Multi-component lines:** dose components in the per-stage ratio listed under
+  "Installed Fertilizer". Never dose a single component on its own unless you
+  diagnose a specific deficiency.
+- **Single-component lines:** one channel covers all nutrients; the agent
+  calibrates ml→EC empirically from the dosing log.
 
 After any dose, set \`next_check_minutes\`: 30–60.
+
+# Available Channels Depend On The Rig
+
+The per-cycle prompt lists "Available Dosing Channels" — that's the ENTIRE
+universe of dose actions you can request. Some systems have:
+- pH up only (no pH down) → if pH goes too high, raise a **manual_action** task.
+- pH down only (no pH up) → if pH drops too low, raise a **manual_action** task.
+- Both pH channels → handle drift in either direction autonomously.
+- Single-bottle fertilizer (no separate Micro/Grow/Bloom) → one nutrient channel.
+
+Never propose actions on channels not listed for this rig. The SafetyController
+will block them anyway, but it's wasted reasoning.
 
 # Safety Hard Limits (do not fight)
 
@@ -127,12 +149,15 @@ Create tasks for the human grower when you can't act directly:
 
 # Response Schema (JSON exactly, no markdown wrapping)
 
+The valid \`channel\` values are listed in "Available Dosing Channels" of the
+per-cycle prompt. Use those keys exactly.
+
 \`\`\`
 {
   "analysis": "1-3 sentences referencing cross-window evidence",
   "status": "healthy" | "attention" | "warning" | "critical",
   "actions": [
-    { "channel": "micro"|"grow"|"bloom"|"ph_up", "amount_ml": <number>, "reason": "<English>" }
+    { "channel": "<one of available>", "amount_ml": <number>, "reason": "<English>" }
   ],
   "human_tasks_to_create": [
     { "type": "...", "priority": "low|medium|high|urgent", "title": "<Hebrew>", "reason": "<Hebrew>", "payload": {...}, "expires_in_hours": <number|null> }
@@ -302,9 +327,25 @@ export function buildUserPrompt(opts: {
   systemProfile: SystemProfile;
   recentActions: Array<{ ts: Date; channel: string; amount_ml: number; success: boolean; reason: string }>;
   availableChannels: string[];
+  /** Per-system dosing config — drives the channel/profile context lines. */
+  dosingConfig?: DosingConfig;
+  /** Profile referenced by the config; used to render NPK + stage ratios. */
+  fertilizerProfile?: FertilizerProfile | null;
+  /** Per-channel feed-tube priming state — first ~8ml on unprimed channels doesn't reach reservoir. */
+  primingState?: PrimingState | null;
   pendingTasks: Pick<HumanTask, "id" | "type" | "priority" | "title" | "created_at">[];
 }): string {
-  const { current, recent, systemProfile, recentActions, availableChannels, pendingTasks } = opts;
+  const {
+    current,
+    recent,
+    systemProfile,
+    recentActions,
+    availableChannels,
+    dosingConfig,
+    fertilizerProfile,
+    primingState,
+    pendingTasks,
+  } = opts;
   const sections: string[] = [];
 
   sections.push("## Sensor Statistics (windowed — use these, not raw points)");
@@ -351,8 +392,72 @@ export function buildUserPrompt(opts: {
     sections.push("");
   }
 
-  sections.push("## Available Dosing Channels");
-  for (const c of availableChannels) sections.push(`  - ${c}`);
+  sections.push("## Installed Fertilizer");
+  if (fertilizerProfile) {
+    sections.push(`  Profile: ${fertilizerProfile.name_en} (${fertilizerProfile.vendor})`);
+    sections.push(`  Profile ID: ${fertilizerProfile.id}`);
+    if (fertilizerProfile.ml_per_50us_per_60L !== undefined) {
+      sections.push(
+        `  Rough calibration: ${fertilizerProfile.ml_per_50us_per_60L} ml of mixed-nutrient ≈ +50 μS/cm on 60L`
+      );
+    }
+    sections.push("  Components:");
+    for (const c of fertilizerProfile.components) {
+      const parts = [`    - ${c.key} (${c.label_en})`];
+      if (c.npk) parts.push(`NPK=${c.npk}`);
+      sections.push(parts.join(" · "));
+    }
+    const stage = (systemProfile.growth_stage as string | undefined) ?? "vegetative";
+    const stageRatio = fertilizerProfile.stage_ratios[stage];
+    if (stageRatio) {
+      const ratioStr = Object.entries(stageRatio)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(" : ");
+      sections.push(`  Stage ratio (${stage}): ${ratioStr}`);
+    }
+  } else {
+    sections.push("  (no profile attached — assume single-bottle generic nutrient)");
+  }
+  sections.push("");
+
+  sections.push("## Available Dosing Channels (the ENTIRE universe of dose actions)");
+  if (dosingConfig) {
+    for (const c of availableChannels) {
+      const a = dosingConfig.assignments[c];
+      const phys = a ? `physical channe${a.physical}` : "?";
+      const role = a?.role ?? "?";
+      const primed = primingState?.channels[c]?.primed;
+      const primingTag =
+        primed === undefined
+          ? ""
+          : primed
+          ? " · primed"
+          : " · UNPRIMED (first ~8ml feeds the dead-volume tube, no reservoir change)";
+      sections.push(`  - ${c} · role=${role} · ${phys}${primingTag}`);
+    }
+    const ph = {
+      up: hasPhUp(dosingConfig) ? phUpKey(dosingConfig) : null,
+      down: hasPhDown(dosingConfig) ? phDownKey(dosingConfig) : null,
+    };
+    sections.push(
+      `  pH correction available: up=${ph.up ?? "no"} · down=${ph.down ?? "no"}`
+    );
+    const nutrients = nutrientKeys(dosingConfig);
+    sections.push(
+      `  Nutrient channels: ${nutrients.length > 0 ? nutrients.join(", ") : "(none)"}`
+    );
+    if (primingState) {
+      const unprimed = availableChannels.filter((c) => primingState.channels[c]?.primed === false);
+      if (unprimed.length > 0) {
+        sections.push(
+          `  ⚠ UNPRIMED channels (first ~8ml fills dead-volume, no EC/pH effect): ${unprimed.join(", ")}. ` +
+            `If you need to dose one of these, expect the FIRST dose to do nothing measurable.`
+        );
+      }
+    }
+  } else {
+    for (const c of availableChannels) sections.push(`  - ${c}`);
+  }
   sections.push("");
 
   const now = new Date();

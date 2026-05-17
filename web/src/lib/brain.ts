@@ -13,7 +13,10 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { generateText } from "ai";
 import { SYSTEM_PROMPT, buildUserPrompt, type SystemProfile } from "./prompt-engine";
 import { validateCommand, type DoserChannel } from "./safety";
-import type { WaterReading, HumanTask, TaskType, TaskPriority } from "./db";
+import { DEFAULT_SYSTEM_ID, type WaterReading, type HumanTask, type TaskType, type TaskPriority } from "./db";
+import { allChannelKeys, getDosingConfig, type DosingConfig } from "./dosing-config";
+import { getProfile } from "./fertilizer-profiles";
+import { getPrimingState, type PrimingState } from "./priming";
 
 const CACHE_TTL_BETA = "extended-cache-ttl-2025-04-11";
 
@@ -21,8 +24,6 @@ const anthropic = createAnthropic({
   apiKey: process.env.GROWK_ANTHROPIC_KEY || process.env.ANTHROPIC_API_KEY,
   baseURL: "https://api.anthropic.com/v1",
 });
-
-const CHANNELS: DoserChannel[] = ["micro", "grow", "bloom", "ph_up"];
 
 export type ApprovedCommand = {
   channel: DoserChannel;
@@ -75,13 +76,29 @@ export async function analyzeAndDecide(opts: {
   systemProfile: SystemProfile;
   recentActions: Array<{ ts: Date; channel: string; amount_ml: number; success: boolean; reason: string }>;
   pendingTasks: HumanTask[];
+  /** Per-system dosing config. Optional for backward-compat — looked up if absent. */
+  dosingConfig?: DosingConfig;
+  /** System id whose history we're reasoning about. Used for safety + DB scoping. */
+  systemId?: string;
 }): Promise<DecisionResult> {
+  const systemId = opts.systemId ?? DEFAULT_SYSTEM_ID;
+  const dosingConfig = opts.dosingConfig ?? (await getDosingConfig(systemId));
+  const channels = allChannelKeys(dosingConfig);
+  const fertilizerProfile = getProfile(dosingConfig.profile_id);
+  // Priming state is derived from the dosing_actions log — small DB read,
+  // worth the trip so Claude knows which channels still need their first
+  // ~8ml prime before any dose-vs-EC reasoning is meaningful.
+  const primingState: PrimingState = await getPrimingState(systemId);
+
   const userPrompt = buildUserPrompt({
     current: opts.current,
     recent: opts.recent,
     systemProfile: opts.systemProfile,
     recentActions: opts.recentActions,
-    availableChannels: CHANNELS,
+    availableChannels: channels,
+    dosingConfig,
+    fertilizerProfile,
+    primingState,
     pendingTasks: opts.pendingTasks.map((t) => ({
       id: t.id,
       type: t.type,
@@ -133,10 +150,10 @@ export async function analyzeAndDecide(opts: {
     const action = a as Record<string, unknown>;
     const channelStr = String(action.channel || "");
     const amountMl = Number(action.amount_ml);
-    if (!CHANNELS.includes(channelStr as DoserChannel)) {
+    if (!channels.includes(channelStr)) {
       blocked.push({
         command: `${channelStr} ${amountMl}ml`,
-        reason: `Unknown channel '${channelStr}'`,
+        reason: `Unknown channel '${channelStr}' (configured: ${channels.join(", ") || "(none)"})`,
       });
       continue;
     }
@@ -152,7 +169,7 @@ export async function analyzeAndDecide(opts: {
       amount_ml: amountMl,
       reason: String(action.reason || "AI recommended"),
     };
-    const v = await validateCommand(cmd, opts.current);
+    const v = await validateCommand(cmd, opts.current, { systemId, dosingConfig });
     if (v.ok) approved.push(cmd);
     else blocked.push({ command: `Dose ${cmd.amount_ml}ml of ${cmd.channel}`, reason: v.reason });
   }
