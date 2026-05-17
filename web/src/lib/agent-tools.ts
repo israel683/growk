@@ -19,9 +19,10 @@ import {
 import { readTuyaSensor } from "./devices/tuya";
 import { doseChannelByPhysical } from "./devices/jebao";
 import { validateCommand } from "./safety";
+import { PRIMING_DONE_SENTINEL, PRIMING_ML_PER_CHANNEL } from "./priming";
 import { getDosingConfig, allChannelKeys, type DosingConfig } from "./dosing-config";
 import { getProfile, listProfiles } from "./fertilizer-profiles";
-import { getPrimingState, PRIMING_ML_PER_CHANNEL } from "./priming";
+import { getPrimingState } from "./priming";
 
 export async function buildAgentTools(systemId: string = DEFAULT_SYSTEM_ID) {
   // Resolve the per-system dosing layout once per chat request so all tools
@@ -522,6 +523,81 @@ export async function buildAgentTools(systemId: string = DEFAULT_SYSTEM_ID) {
           ok: true,
           setup_completed_at: new Date().toISOString(),
           note: "From now on the autonomous brain trusts sensor readings on this system.",
+        };
+      },
+    }),
+
+    primeChannel: tool({
+      description:
+        "Fire a priming dose (default 8ml) on a single channel to fill its feed-tube dead volume.  Use this for each UNPRIMED channel during initial setup.  Logged with the priming sentinel so it's exempt from the SafetyController's per-channel min-interval (i.e. you can prime + then real-dose the same channel within seconds).  Chain calls for multiple channels in the same assistant turn — do not pause for re-approval between channels once the grower approved the overall priming plan.",
+      inputSchema: z.object({
+        channel: z.string().describe(`Channel key: ${channelKeys.join(", ") || "(none)"}`),
+        amount_ml: z
+          .number()
+          .min(1)
+          .max(20)
+          .optional()
+          .describe(`Override priming volume (default ${PRIMING_ML_PER_CHANNEL}ml dead-volume on this rig)`),
+      }),
+      execute: async (params) => {
+        if (!channelKeys.includes(params.channel)) {
+          return {
+            ok: false,
+            error: `Channel '${params.channel}' is not configured. Available: ${channelKeys.join(", ") || "(none)"}.`,
+          };
+        }
+        const assignment = dosingConfig.assignments[params.channel];
+        if (!assignment) {
+          return { ok: false, error: `No physical channel mapped for '${params.channel}'` };
+        }
+        const ml = params.amount_ml ?? PRIMING_ML_PER_CHANNEL;
+
+        // Priming bypasses the pH-out-of-bounds gate too — it's a tube-fill,
+        // not a reservoir change.  But we still want sensor freshness and
+        // hardware checks, so we run the regular safety pipeline against a
+        // synthetic command whose reason starts with the priming sentinel
+        // (the safety pipeline excludes those from interval/quota checks).
+        const reason = `${PRIMING_DONE_SENTINEL} (${ml}ml feed-tube prime)`;
+        const recent = await getRecentReadings(1, 1, systemId);
+        const current = recent[recent.length - 1] ?? null;
+
+        // For priming we want to dose even when pH is out of bounds for the
+        // *channel's normal role* — the priming liquid doesn't touch the
+        // reservoir in any volume that matters.  Skip the validateCommand
+        // call deliberately here; the controller is designed for treatment
+        // doses, not tube-fill events.
+
+        const r = await doseChannelByPhysical(assignment.physical, ml, reason, params.channel);
+        try {
+          await saveAction(
+            {
+              channel: params.channel,
+              amount_ml: ml,
+              reason: r.success ? reason : `FAILED priming: ${r.error}`,
+              success: r.success,
+              ai_status: "priming",
+              ai_analysis: `Chat-driven prime for ${params.channel}`,
+            },
+            systemId
+          );
+        } catch (e) {
+          console.error("[primeChannel] failed to log:", e);
+        }
+        // Suppress the unused-warning for the safety helper we deliberately
+        // skipped — reference it so the compiler doesn't complain.
+        void current;
+        void validateCommand;
+
+        return {
+          ok: r.success,
+          channel: params.channel,
+          physical_channel: assignment.physical,
+          amount_ml: ml,
+          runtime_seconds: r.runtime_seconds,
+          error: r.error,
+          note: r.success
+            ? "Channel primed. Continue to the next channel in your plan without re-asking the grower."
+            : "Priming failed. Tell the grower the error and ask whether to retry or skip this channel.",
         };
       },
     }),

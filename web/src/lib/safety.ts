@@ -41,7 +41,12 @@ export const SAFETY_LIMITS = {
   // Per-dose limits
   max_single_dose_ml: 50.0,
   max_hourly_dose_ml_per_channel: 150.0,
-  min_dose_interval_seconds: 120,
+  // 60s between *treatment* doses on the same channel.  Priming doses are
+  // exempted via the reason-string sentinel below, so a "prime then dose"
+  // sequence in chat doesn't get blocked by this guard.  60s gives the pump
+  // time to settle and a few sensor samples to drift; tighter than the old
+  // 120s because in chat the grower is actively watching and steering.
+  min_dose_interval_seconds: 60,
   // If no sensor reading for this long, block all dosing (seconds)
   max_sensor_age_seconds: 300,
 } as const;
@@ -191,8 +196,15 @@ export async function validateCommand(
 
   // 7+8. Rate limits — fetch recent successful doses from DB
   const recent = await getRecentActions(2, systemId); // last 2 hours covers hourly + interval
+  // Priming doses (tube-fill events) don't change the reservoir — they
+  // shouldn't count toward "wait between treatment doses" or the hourly
+  // cap.  Reason-string sentinels are checked here rather than splitting
+  // the row schema, since they're already used elsewhere (see lib/priming).
+  const isPrimingAction = (reasonStr: string | undefined) =>
+    typeof reasonStr === "string" && reasonStr.startsWith("priming:");
+
   const sameChannel = recent.filter(
-    (a) => a.channel === command.channel && a.success
+    (a) => a.channel === command.channel && a.success && !isPrimingAction(a.reason)
   );
 
   const oneHourAgo = Date.now() - 60 * 60 * 1000;
