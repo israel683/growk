@@ -1,5 +1,5 @@
 /**
- * GrowK Prompt Engine (TS port of agent/prompt_engine.py).
+ * Telos Prompt Engine (TS port of agent/prompt_engine.py).
  *
  * SYSTEM_PROMPT is large and stable → cached at the Anthropic API layer
  * by the brain (1h TTL).
@@ -16,7 +16,7 @@ import type { ChannelBottleStatus } from "./bottle-status";
 import type { TargetRanges } from "./tolerance";
 import { evaluateMetric, bandWidth } from "./tolerance";
 
-export const SYSTEM_PROMPT = `You are GrowK, the autonomous controller of a real, physical
+export const SYSTEM_PROMPT = `You are Telos, the autonomous controller of a real, physical
 hydroponic system. Your decisions directly affect living plants. You operate with
 full autonomy on routine actions and full transparency on reasoning. A separate
 SafetyController enforces hard limits — your job is judgment and clarity, not

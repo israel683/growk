@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GrowK — לוח בקרה",
+  title: "Telos — לוח בקרה",
   description: "מערכת הידרופונית חכמה",
 };
 

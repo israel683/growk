@@ -3,7 +3,7 @@
 /**
  * Interactive system architecture explorer.
  *
- * Single-page reference of the entire GrowK stack — hardware, cloud APIs,
+ * Single-page reference of the entire Telos stack — hardware, cloud APIs,
  * cron jobs, brain, safety/control layers, chat agent, dashboard, and the
  * grower interface — designed to be navigated together.  Click any block
  * to expand its deep-dive panel.  Hebrew with English code/file refs.
@@ -650,7 +650,7 @@ export default function ArchitecturePage() {
   return (
     <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 space-y-6" dir="rtl">
       <header className="space-y-1">
-        <h1 className="text-3xl font-bold">ארכיטקטורת GrowK</h1>
+        <h1 className="text-3xl font-bold">ארכיטקטורת Telos</h1>
         <p className="text-zinc-500 text-sm leading-relaxed max-w-3xl">
           מפת המערכת המלאה — חומרה, ענן, שירותי שרת, מוח AI, שכבות בקרה ובטיחות,
           ממשק משתמש.  לחיצה על כל בלוק תפתח פאנל מפורט עם קונספטים מרכזיים,

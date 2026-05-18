@@ -1,5 +1,5 @@
 /**
- * GrowK Safety Controller — the LAST LINE OF DEFENSE before any dose reaches
+ * Telos Safety Controller — the LAST LINE OF DEFENSE before any dose reaches
  * hardware. These limits are NOT negotiable by the AI.
  *
  * The controller is now per-system: it consults the system's DosingConfig

@@ -1,5 +1,5 @@
 /**
- * GrowK Brain — Claude decision engine (TS port of agent/brain.py).
+ * Telos Brain — Claude decision engine (TS port of agent/brain.py).
  *
  * Flow:
  *  1. Build windowed-stats user prompt

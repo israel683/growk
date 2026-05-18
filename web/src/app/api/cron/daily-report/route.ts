@@ -32,7 +32,7 @@ function authorized(req: Request): boolean {
   return false;
 }
 
-const REPORT_PROMPT = `You are GrowK, the agronomist. Write a short DAILY REPORT in Hebrew for the grower covering the past 24 hours.
+const REPORT_PROMPT = `You are Telos, the agronomist. Write a short DAILY REPORT in Hebrew for the grower covering the past 24 hours.
 
 Style:
 - 3–5 short paragraphs OR a brief bullet list. Markdown allowed.

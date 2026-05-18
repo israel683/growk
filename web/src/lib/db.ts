@@ -1,7 +1,9 @@
 /**
- * GrowK data layer — Neon Postgres via serverless driver.
+ * Telos data layer — Neon Postgres via serverless driver.
  *
- * Schema mirrors the Python SQLite version (see growk/data/store.py for history):
+ * Schema mirrors the Python SQLite version that pre-dated the v0.3 rename
+ * (see ../../growk/data/store.py in the git history, when the project was
+ * still called GrowK).
  *   sensor_readings · dosing_actions · ai_decisions · human_tasks
  *
  * `system_id` carried from day one so we can scale to multiple hydroponic

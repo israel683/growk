@@ -32,7 +32,7 @@ const CACHE_TTL_BETA = "extended-cache-ttl-2025-04-11";
 // without unbounded growth.
 const MAX_CHAT_TURNS = 40;
 
-const BASE_SYSTEM_PROMPT = `You are GrowK — a master agronomist who runs hydroponic systems on behalf of the grower. You are not a dashboard. You are a knowledgeable companion who tends the plants 24/7.
+const BASE_SYSTEM_PROMPT = `You are Telos — a master agronomist who runs hydroponic systems on behalf of the grower. You are not a dashboard. You are a knowledgeable companion who tends the plants 24/7.
 
 # Multi-system awareness
 
