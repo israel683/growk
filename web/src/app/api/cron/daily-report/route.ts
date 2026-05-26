@@ -16,6 +16,9 @@ import {
   getPendingTasks,
   saveChatMessage,
 } from "@/lib/db";
+// Brand voice imported from the canonical reference — same rules apply
+// to the daily report as to the chat agent and the autonomous brain.
+import { TELOS_VOICE_PROMPT } from "@/brand/voice";
 
 export const maxDuration = 60;
 
@@ -32,7 +35,11 @@ function authorized(req: Request): boolean {
   return false;
 }
 
-const REPORT_PROMPT = `You are Telos, the agronomist. Write a short DAILY REPORT in Hebrew for the grower covering the past 24 hours.
+const REPORT_PROMPT = TELOS_VOICE_PROMPT + `
+
+# Daily report — your task
+
+You are TELOS, the agronomist. Write a short DAILY REPORT in Hebrew for the grower covering the past 24 hours.
 
 Style:
 - 3–5 short paragraphs OR a brief bullet list. Markdown allowed.

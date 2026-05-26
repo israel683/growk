@@ -8,11 +8,13 @@ import { getActiveSystem } from "@/lib/system";
 import { StackedQuestion } from "@/components/StackedQuestion";
 import { PendingTasksCard } from "@/components/PendingTasksCard";
 
+// Starters phrased in TELOS voice — short, specific, factual.
+// "Always specific.  Day 21, not 'how's it going'."  See brand/voice.ts.
 const STARTERS = [
-  "מה מצב הצמחים עכשיו?",
-  "מה החלטת בשעה האחרונה ולמה?",
-  "ראיתי שהעלים קצת חיוורים — מה לעשות?",
-  "האם כדאי להחליף מים השבוע?",
+  "מה הקריאה עכשיו",
+  "מה השתנה ב-6 השעות האחרונות",
+  "פירוט מנות היום",
+  "צריך לפעול במשהו",
 ];
 
 type HistoryMessage = {
@@ -163,38 +165,52 @@ export default function ChatPage() {
         className="flex-1 overflow-y-auto pb-4 space-y-5 scroll-smooth"
       >
         {isEmpty && isFreshSystem && (
-          <div className="text-center pt-16 pb-8">
-            <div className="text-5xl mb-3">🌱</div>
-            <h1 className="text-2xl font-semibold mb-2">מערכת חדשה</h1>
-            <p className="text-zinc-500 text-sm leading-relaxed max-w-md mx-auto mb-6">
-              אני אנחה אותך דרך ההקמה — שם, גידול, נפח מאגר, דשן והערוצים הפיזיים.
-              לחיצה אחת ואני מתחיל לשאול.
+          // Fresh-system empty state — TELOS voice: no welcome flourish,
+          // no rocket emoji, no "let's begin your journey".  A position,
+          // then a single fact-shaped CTA.
+          <div className="text-center pt-16 pb-8" dir="rtl">
+            <div className="t-eyebrow mb-4">Day 0</div>
+            <h1
+              className="font-display italic font-light text-3xl sm:text-4xl mb-3 text-[var(--c-parchment)]"
+              style={{ fontFamily: "var(--f-display-he)" }}
+            >
+              מערכת חדשה.
+            </h1>
+            <p className="text-[var(--c-ash)] text-sm leading-relaxed max-w-md mx-auto mb-8">
+              לחיצה אחת. שם, גידול, נפח, דשן, ערוצים.
+              TELOS שואל. אתה עונה.
             </p>
             <button
               onClick={() => handleSubmit("בוא נתחיל להקים את המערכת")}
               disabled={isStreaming}
-              className="px-6 py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm disabled:opacity-50"
+              className="px-6 py-3 rounded-full bg-[var(--c-basil)] hover:brightness-110 text-[var(--c-void)] font-medium text-sm disabled:opacity-50 tracking-wide transition-all"
             >
-              התחל הקמה →
+              התחל ←
             </button>
           </div>
         )}
 
         {isEmpty && !isFreshSystem && (
-          <div className="text-center pt-16 pb-8">
-            <h1 className="text-2xl font-semibold mb-2">
-              שלום ישראל 👋
+          // Returning-user empty state — TELOS voice: a fact, a question
+          // the data could answer, no greeting fluff.  Starters are short,
+          // specific, and end without punctuation.
+          <div className="text-center pt-16 pb-8" dir="rtl">
+            <div className="t-eyebrow mb-4">TELOS Farm</div>
+            <h1
+              className="font-display italic font-light text-3xl sm:text-4xl mb-3 text-[var(--c-parchment)]"
+              style={{ fontFamily: "var(--f-display-he)" }}
+            >
+              אני כאן.
             </h1>
-            <p className="text-zinc-500 text-sm leading-relaxed max-w-md mx-auto">
-              אני המחקלאי שמטפל לך בהידרופוניקה.
-              דבר איתי על הצמחים, שאל למה ביצעתי משהו, או בקש המלצה.
+            <p className="text-[var(--c-ash)] text-sm leading-relaxed max-w-md mx-auto">
+              שאל. אענה מהדאטה.
             </p>
-            <div className="mt-6 grid sm:grid-cols-2 gap-2 max-w-lg mx-auto">
+            <div className="mt-8 grid sm:grid-cols-2 gap-2 max-w-lg mx-auto">
               {STARTERS.map((s) => (
                 <button
                   key={s}
                   onClick={() => handleSubmit(s)}
-                  className="text-right text-sm p-3 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors"
+                  className="text-right text-sm p-3 rounded-md border border-[rgba(238,237,232,0.12)] bg-[var(--c-soil)] hover:bg-[var(--c-earth)] hover:border-[rgba(137,168,62,0.25)] text-[var(--c-fog)] transition-colors"
                 >
                   {s}
                 </button>

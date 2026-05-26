@@ -32,7 +32,16 @@ const CACHE_TTL_BETA = "extended-cache-ttl-2025-04-11";
 // without unbounded growth.
 const MAX_CHAT_TURNS = 40;
 
-const BASE_SYSTEM_PROMPT = `You are Telos — a master agronomist who runs hydroponic systems on behalf of the grower. You are not a dashboard. You are a knowledgeable companion who tends the plants 24/7.
+// Brand voice is the single source of truth — imported at module load
+// from src/brand/voice.ts so the chat agent's outward voice stays in
+// lock-step with marketing and product copy.
+import { TELOS_VOICE_PROMPT } from "@/brand/voice";
+
+const BASE_SYSTEM_PROMPT = TELOS_VOICE_PROMPT + `
+
+# Your role inside the TELOS system
+
+You are TELOS — a master agronomist who runs hydroponic systems on behalf of the grower. You are not a dashboard. You are a knowledgeable companion who tends the plants 24/7.
 
 # Multi-system awareness
 

@@ -1,28 +1,154 @@
 @import "tailwindcss";
 
+/* ════════════════════════════════════════════════════════════════
+   TELOS Design Tokens — mirrors src/brand/tokens.ts
+   "A visual language that lives between earth and precision."
+   See TELOS Brand Kit v1.0 for the canonical reference.
+   ════════════════════════════════════════════════════════════════ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Foundation — Warm Neutral dark system (R=G > B by 2-3 points) */
+  --c-void:      #0c0c0a;
+  --c-soil:      #181815;
+  --c-earth:     #232320;
+  --c-bark:      #333330;
+  --c-stone:     #606058;
+  --c-ash:       #9a9a92;
+  --c-fog:       #c6c5be;
+  --c-parchment: #eeede8;
+
+  /* Accents — used sparingly */
+  --c-basil:   #89a83e;
+  --c-moss:    #3e5230;
+  --c-terra:   #a8593a;
+  --c-mineral: #3a4d4a;
+
+  /* Semantic aliases */
+  --c-success: var(--c-basil);
+  --c-warning: var(--c-terra);
+  --c-data:    var(--c-mineral);
+
+  /* Legacy aliases so existing components keep working during the
+     incremental migration.  background = void, foreground = parchment. */
+  --background: var(--c-void);
+  --foreground: var(--c-parchment);
+
+  /* Font stacks — defined here, injected by next/font in layout.tsx */
+  --f-display: var(--font-cormorant), Georgia, serif;
+  --f-body:    var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
+  --f-display-he: 'Noto Serif Hebrew', var(--font-cormorant), serif;
+  --f-body-he:    var(--font-rubik), 'Rubik', system-ui, sans-serif;
+  --f-numbers: var(--font-cormorant), Georgia, serif;
+
+  /* Type scale */
+  --t-xs:   0.58rem;
+  --t-sm:   0.75rem;
+  --t-base: 0.95rem;
+  --t-md:   1.25rem;
+  --t-lg:   1.8rem;
+  --t-xl:   2.5rem;
+  --t-2xl:  4rem;
+
+  /* Tracking */
+  --ls-tight:  0.02em;
+  --ls-normal: 0.05em;
+  --ls-wide:   0.15em;
+  --ls-label:  0.28em;
+  --ls-logo:   0.18em;
+
+  /* Radii — data has none, only primary CTA gets the pill */
+  --r-none: 0px;
+  --r-sm:   4px;
+  --r-md:   8px;
+  --r-lg:   14px;
+  --r-pill: 999px;
+
+  /* Borders — fixed alphas against the dark system */
+  --border-subtle: 1px solid rgba(238, 237, 232, 0.07);
+  --border-dim:    1px solid rgba(238, 237, 232, 0.12);
+  --border-basil:  1px solid rgba(137, 168, 62, 0.25);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in:  cubic-bezier(0.64, 0, 0.78, 0);
+  --dur-fast: 150ms;
+  --dur-base: 280ms;
+  --dur-slow: 600ms;
 }
 
+/* Map a subset of the tokens into Tailwind 4's @theme so utility
+   classes can use the brand names directly (bg-basil / text-parchment
+   / border-basil etc.).  We KEEP the existing zinc/* palette for the
+   incremental migration — tokens are added, not replaced. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  --color-void:      var(--c-void);
+  --color-soil:      var(--c-soil);
+  --color-earth:     var(--c-earth);
+  --color-bark:      var(--c-bark);
+  --color-stone:     var(--c-stone);
+  --color-ash:       var(--c-ash);
+  --color-fog:       var(--c-fog);
+  --color-parchment: var(--c-parchment);
+
+  --color-basil:   var(--c-basil);
+  --color-moss:    var(--c-moss);
+  --color-terra:   var(--c-terra);
+  --color-mineral: var(--c-mineral);
+
+  --font-sans:    var(--f-body);
+  --font-display: var(--f-display);
+  --font-mono:    ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* TELOS is a DARK system by default.  We don't auto-switch on
+   prefers-color-scheme — the Warm Neutral palette IS the brand. */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--c-void);
+  color: var(--c-parchment);
+  font-family: var(--f-body);
+  font-weight: 300;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* RTL Hebrew uses the Hebrew stack automatically when the html dir
+   attribute is rtl OR the lang attribute starts with 'he'. */
+html[lang^="he"] body,
+html[dir="rtl"] body {
+  font-family: var(--f-body-he);
+}
+
+/* Numbers + data points render in Cormorant Italic.  Add the
+   `.t-num` utility to ANY span/div that's pure numeric data. */
+.t-num {
+  font-family: var(--f-numbers);
+  font-style: italic;
+  font-weight: 300;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The TELOS wordmark.  Cormorant 300 + 0.22em tracking + tiny basil
+   underline.  Used in the nav and anywhere we render "TELOS" as a
+   logotype rather than a string. */
+.t-wordmark {
+  font-family: var(--f-display);
+  font-weight: 300;
+  letter-spacing: 0.22em;
+  padding-inline-end: 0.22em; /* compensate for tracking on the last char */
+  color: var(--c-parchment);
+}
+
+/* Eyebrows / labels — small, wide-tracked, uppercase, muted. */
+.t-eyebrow {
+  font-family: var(--f-body);
+  font-size: var(--t-xs);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--c-stone);
 }
 
 /* Hide scrollbars on horizontally-scrollable containers (e.g. the nav
