@@ -158,11 +158,78 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages, status]);
 
-  function handleSubmit(text?: string) {
+  // Attached files (images for now — Claude Sonnet 4.6 has vision input).
+  // AI SDK 6's DefaultChatTransport handles the multipart upload + base64
+  // serialisation automatically; on the server convertToModelMessages
+  // turns the parts into Anthropic image content blocks.
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const list = e.target.files;
+    if (!list || list.length === 0) return;
+    // Cap at 4 images per turn to keep the prompt sane.  Show oldest first.
+    const next = [...attachedFiles, ...Array.from(list)].slice(0, 4);
+    setAttachedFiles(next);
+    // Reset the input so the SAME file can be re-selected later after
+    // it's been removed from the chip list.
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function removeAttachment(idx: number) {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  /**
+   * Convert a File to a FileUIPart for the AI SDK.  Vision-capable models
+   * (Claude Sonnet 4.6) accept image parts inline as base64 data URLs,
+   * and `convertToModelMessages` on the server turns them into Anthropic
+   * image content blocks automatically.  For POC scale (one grower, a
+   * handful of plant photos per session) inline base64 is fine; if we
+   * later need to handle long-running threads or larger files, this is
+   * where we'd swap to Vercel Blob and pass an external URL instead.
+   */
+  function fileToDataUrl(f: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(f);
+    });
+  }
+
+  async function handleSubmit(text?: string) {
     const value = (text ?? input).trim();
-    if (!value || status !== "ready") return;
-    sendMessage({ text: value });
+    const hasFiles = attachedFiles.length > 0;
+    if (!value && !hasFiles) return;
+    if (status !== "ready") return;
+
+    let fileParts: Array<{ type: "file"; mediaType: string; url: string; filename?: string }> | undefined;
+    if (hasFiles) {
+      try {
+        fileParts = await Promise.all(
+          attachedFiles.map(async (f) => ({
+            type: "file" as const,
+            mediaType: f.type || "image/jpeg",
+            url: await fileToDataUrl(f),
+            filename: f.name,
+          }))
+        );
+      } catch (err) {
+        console.error("[chat] file read failed:", err);
+        alert("לא הצלחתי לקרוא את הקובץ. נסה שוב.");
+        return;
+      }
+    }
+
+    sendMessage({
+      // If the grower attached only images with no caption, still send a
+      // minimal text so the agent has SOMETHING to ground its reply on.
+      text: value || "(תמונה מצורפת — תסתכל ותגיד מה אתה רואה)",
+      ...(fileParts ? { files: fileParts } : {}),
+    });
     setInput("");
+    setAttachedFiles([]);
   }
 
   const isEmpty = historyLoaded && messages.length === 0;
@@ -178,7 +245,9 @@ export default function ChatPage() {
     (systemInfo.name === "מערכת חדשה" || systemInfo.name === "");
 
   return (
-    <main className="flex-1 flex flex-col max-w-3xl w-full mx-auto px-3 sm:px-4 pt-4 sm:pt-6 pb-2 sm:pb-6 min-h-0">
+    // Sticky input dock handles its own safe-area padding so main has no
+    // bottom padding — otherwise we'd get an empty band below the dock.
+    <main className="flex-1 flex flex-col max-w-3xl w-full mx-auto px-3 sm:px-4 pt-4 sm:pt-6 min-h-0">
       {/* Messages */}
       <div
         ref={scrollRef}
@@ -285,45 +354,116 @@ export default function ChatPage() {
         <div ref={bottomRef} aria-hidden="true" />
       </div>
 
-      {/* Pending tasks (dose approvals, manual actions, etc.) — sticky just
-          above the input so the grower can act inline without leaving the
-          chat.  Renders nothing when there's nothing pending. */}
-      <PendingTasksCard />
-
-      {/* Input — padded against the iOS safe-area inset so the send button
-          isn't covered by the home-indicator on notch phones.  The flex
-          parent already keeps this row pinned at the bottom of the
-          viewport via `flex-1 flex flex-col min-h-0`. */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleSubmit();
-        }}
-        className="border-t border-[rgba(238,237,232,0.07)] pt-3 flex gap-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+      {/* Input dock — sticky to the bottom of the viewport with an opaque
+          background so messages scroll BEHIND it (and via the
+          scroll-sentinel above, never under it on first paint).  The
+          dock contains the pending-tasks widget + any attachment chips
+          + the input row, all glued together so the grower's primary
+          interaction surface is always reachable. */}
+      <div
+        className="sticky bottom-0 z-20 bg-[var(--c-void)] -mx-3 sm:-mx-4 px-3 sm:px-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSubmit();
-            }
+        {/* Pending tasks card sits inside the dock so it shares the
+            opaque background — otherwise messages would be visible
+            through it when there's a pending task. */}
+        <PendingTasksCard />
+
+        {/* Attachment preview row — chips with thumbnails + remove ×.
+            Only renders when there's at least one selected file. */}
+        {attachedFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2 pb-2 pt-1">
+            {attachedFiles.map((f, idx) => {
+              const url = URL.createObjectURL(f);
+              return (
+                <div
+                  key={`${f.name}-${idx}`}
+                  className="relative group rounded-sm overflow-hidden border border-[rgba(238,237,232,0.12)] bg-[var(--c-soil)]"
+                  style={{ width: 64, height: 64 }}
+                >
+                  {/* Using a plain img tag — we need an in-memory blob URL
+                      for unsubmitted files; next/image needs a remote URL. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url}
+                    alt={f.name}
+                    className="object-cover w-full h-full"
+                    onLoad={() => URL.revokeObjectURL(url)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(idx)}
+                    className="absolute top-0.5 end-0.5 w-5 h-5 rounded-full bg-[var(--c-void)]/85 text-[var(--c-parchment)] text-xs leading-none flex items-center justify-center hover:bg-[var(--c-terra)] transition-colors"
+                    aria-label={`הסר ${f.name}`}
+                    title={f.name}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
           }}
-          rows={1}
-          placeholder="כתוב הודעה..."
-          disabled={isStreaming}
-          className="flex-1 resize-none bg-[var(--c-soil)] border border-[rgba(238,237,232,0.07)] text-[var(--c-parchment)] placeholder:text-[var(--c-stone)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[rgba(137,168,62,0.45)] focus:ring-1 focus:ring-[rgba(137,168,62,0.25)] disabled:opacity-50"
-          style={{ minHeight: 40, maxHeight: 160 }}
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() || isStreaming}
-          className="px-4 py-2 rounded-full bg-[var(--c-basil)] hover:brightness-110 text-[var(--c-void)] text-sm font-medium disabled:bg-[var(--c-bark)] disabled:text-[var(--c-stone)] disabled:cursor-not-allowed min-h-[40px] sm:min-h-0 tracking-wide transition-all"
+          className="border-t border-[rgba(238,237,232,0.07)] pt-3 flex items-end gap-2"
         >
-          שלח
-        </button>
-      </form>
+          {/* Hidden file input — opened by the attach button.  accept=
+              "image/*" so the OS picker shows camera + photo library on
+              mobile, file browser on desktop. */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={onPickFiles}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isStreaming || attachedFiles.length >= 4}
+            title={
+              attachedFiles.length >= 4
+                ? "מקסימום 4 תמונות בהודעה"
+                : "צרף תמונה"
+            }
+            aria-label="צרף תמונה"
+            className="shrink-0 w-10 h-10 rounded-md border border-[rgba(238,237,232,0.12)] bg-[var(--c-soil)] hover:bg-[var(--c-earth)] hover:border-[rgba(137,168,62,0.25)] text-[var(--c-fog)] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+          >
+            {/* Paperclip glyph — inline SVG so we don't pull an icon lib */}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+            rows={1}
+            placeholder="כתוב הודעה..."
+            disabled={isStreaming}
+            className="flex-1 resize-none bg-[var(--c-soil)] border border-[rgba(238,237,232,0.07)] text-[var(--c-parchment)] placeholder:text-[var(--c-stone)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[rgba(137,168,62,0.45)] focus:ring-1 focus:ring-[rgba(137,168,62,0.25)] disabled:opacity-50"
+            style={{ minHeight: 40, maxHeight: 160 }}
+          />
+          <button
+            type="submit"
+            disabled={(!input.trim() && attachedFiles.length === 0) || isStreaming}
+            className="px-4 py-2 rounded-full bg-[var(--c-basil)] hover:brightness-110 text-[var(--c-void)] text-sm font-medium disabled:bg-[var(--c-bark)] disabled:text-[var(--c-stone)] disabled:cursor-not-allowed min-h-[40px] sm:min-h-0 tracking-wide transition-all"
+          >
+            שלח
+          </button>
+        </form>
+      </div>
     </main>
   );
 }
@@ -423,6 +563,44 @@ function MessageBubble({
         }`}
       >
         {message.parts.map((part, i) => {
+          // File parts (images the grower attached, or images TELOS sends
+          // back — though right now only the inbound direction exists).
+          // AI SDK v6 part shape: { type: 'file', mediaType, url, filename? }.
+          // The url is either a data: URL (inline base64) or an https URL.
+          if (part.type === "file") {
+            const file = part as {
+              type: "file";
+              mediaType?: string;
+              url?: string;
+              filename?: string;
+            };
+            const isImage = (file.mediaType ?? "").startsWith("image/");
+            if (!file.url) return null;
+            if (isImage) {
+              return (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  src={file.url}
+                  alt={file.filename ?? "attached image"}
+                  className="block max-w-full sm:max-w-xs rounded-md border border-[rgba(238,237,232,0.12)] mb-2"
+                  loading="lazy"
+                />
+              );
+            }
+            // Non-image attachment fallback — a link chip.
+            return (
+              <a
+                key={i}
+                href={file.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block text-xs px-2 py-1 rounded-sm border border-[rgba(238,237,232,0.12)] bg-[var(--c-soil)] text-[var(--c-fog)] hover:border-[rgba(137,168,62,0.25)] mb-2"
+              >
+                {file.filename ?? "קובץ מצורף"}
+              </a>
+            );
+          }
           if (part.type === "text") {
             if (isUser) {
               return (
