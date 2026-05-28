@@ -193,53 +193,76 @@ export default function ChatPage() {
    * Resize + re-compress an image client-side BEFORE it hits the wire.
    *
    * Why: Vercel serverless functions cap the request body at 4.5MB.  Inline
-   * base64 inflates files ~33%, so a couple of phone photos (3-5MB each)
-   * blow past the limit → FUNCTION_PAYLOAD_TOO_LARGE.  Resizing to a
-   * ~1280px long edge + JPEG q0.75 brings each image down to ~150-300KB,
-   * which keeps even 4 attachments well under the cap.
+   * base64 inflates files ~33%, so a couple of phone photos blow past the
+   * limit → FUNCTION_PAYLOAD_TOO_LARGE.
    *
-   * Bonus: Claude's vision works best (and cheapest in tokens) with images
-   * whose long edge is ≤1568px — so this also trims vision cost without
-   * hurting diagnostic quality for plant photos.
+   * The hard case is iPhone: photos are HEIC at up to 48MP.  Decoding a
+   * 48MP image into an HTMLImageElement + drawing it to a canvas
+   * overwhelms iOS Safari's canvas memory budget and fails silently —
+   * which previously fell back to the RAW 5MB+ file and re-triggered the
+   * payload error.  `createImageBitmap(file, { resizeWidth, resizeHeight })`
+   * decodes AND downsamples in a single memory-efficient native step,
+   * which iOS handles even for 48MP sources.
    *
-   * Returns a JPEG data URL.  Falls back to the raw file data URL if the
-   * browser can't decode the format into a canvas (rare; e.g. some HEIC
-   * outside Safari).
+   * Returns a JPEG data URL (~150-300KB at 1024px).  Throws if the image
+   * genuinely can't be decoded — caller surfaces that to the grower
+   * instead of silently shipping a too-large raw file.
    */
   async function compressImage(
     f: File,
-    maxEdge = 1280,
-    quality = 0.75
+    maxEdge = 1024,
+    quality = 0.72
   ): Promise<{ url: string; mediaType: string }> {
-    try {
-      const dataUrl = await fileToDataUrl(f);
-      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const el = new Image();
-        el.onload = () => resolve(el);
-        el.onerror = () => reject(new Error("decode failed"));
-        el.src = dataUrl;
-      });
-      const longest = Math.max(img.width, img.height);
-      const scale = Math.min(1, maxEdge / longest);
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("no 2d context");
-      ctx.drawImage(img, 0, 0, w, h);
-      const jpeg = canvas.toDataURL("image/jpeg", quality);
-      // Safety: if for some reason JPEG came out larger than the original
-      // (tiny source images), keep the original.
-      return jpeg.length < dataUrl.length
-        ? { url: jpeg, mediaType: "image/jpeg" }
-        : { url: dataUrl, mediaType: f.type || "image/jpeg" };
-    } catch {
-      // Couldn't canvas-process — fall back to raw.  May still be large,
-      // but better than dropping the attachment entirely.
-      return { url: await fileToDataUrl(f), mediaType: f.type || "image/jpeg" };
+    // Path 1 — createImageBitmap with native resize (handles 48MP iPhone).
+    if (typeof createImageBitmap === "function") {
+      try {
+        const probe = await createImageBitmap(f);
+        const longest = Math.max(probe.width, probe.height);
+        const scale = Math.min(1, maxEdge / longest);
+        const w = Math.max(1, Math.round(probe.width * scale));
+        const h = Math.max(1, Math.round(probe.height * scale));
+        probe.close?.();
+        const bmp = await createImageBitmap(f, {
+          resizeWidth: w,
+          resizeHeight: h,
+          resizeQuality: "high",
+        });
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("no 2d context");
+        ctx.drawImage(bmp, 0, 0);
+        bmp.close?.();
+        const jpeg = canvas.toDataURL("image/jpeg", quality);
+        if (jpeg && jpeg.length > 100) return { url: jpeg, mediaType: "image/jpeg" };
+        throw new Error("empty canvas output");
+      } catch (e) {
+        console.warn("[chat] createImageBitmap path failed, trying <img>:", e);
+        // fall through to path 2
+      }
     }
+
+    // Path 2 — classic Image + canvas (desktop / older browsers).
+    const dataUrl = await fileToDataUrl(f);
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("image decode failed"));
+      el.src = dataUrl;
+    });
+    const longest = Math.max(img.width, img.height);
+    const scale = Math.min(1, maxEdge / longest);
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    ctx.drawImage(img, 0, 0, w, h);
+    const jpeg = canvas.toDataURL("image/jpeg", quality);
+    return { url: jpeg, mediaType: "image/jpeg" };
   }
 
   async function handleSubmit(text?: string) {
