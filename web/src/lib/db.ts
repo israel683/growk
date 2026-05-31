@@ -14,6 +14,7 @@
  */
 import { neon, NeonQueryFunction } from "@neondatabase/serverless";
 import type { GrowProfile } from "./grow-profile";
+import type { GrowerMemoryEntry, GrowerMemoryKind } from "./grower-memory";
 
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
 
@@ -253,6 +254,23 @@ export async function ensureSchema(): Promise<void> {
   await safeDdl(() => s`
     ALTER TABLE human_tasks ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMPTZ
   `);
+
+  // Grower Memory — the persistent knowledge the grower teaches the Brain about
+  // a grow: facts, corrections, preferences.  The third knowledge layer; it
+  // accumulates and is injected into every cycle prompt (lib/grower-memory.ts).
+  // `active=false` soft-deletes an entry the grower retracted.
+  await safeDdl(() => s`
+    CREATE TABLE IF NOT EXISTS grower_memory (
+      id          BIGSERIAL PRIMARY KEY,
+      system_id   TEXT NOT NULL DEFAULT 'default',
+      ts          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      kind        TEXT NOT NULL DEFAULT 'fact',
+      text        TEXT NOT NULL,
+      source      TEXT NOT NULL DEFAULT 'grower',
+      active      BOOLEAN NOT NULL DEFAULT TRUE
+    )
+  `);
+  await safeDdl(() => s`CREATE INDEX IF NOT EXISTS idx_memory_active ON grower_memory(system_id, active, ts DESC)`);
 
   // NOTE: we used to auto-create a 'default' row on every bootstrap so the
   // single-system POC always had a parent for incoming readings.  That made
@@ -753,6 +771,54 @@ export async function updateSystem(
     );
   }
   return getSystem(id);
+}
+
+// === Grower Memory ===
+
+export async function addGrowerMemory(
+  systemId: string,
+  entry: { kind: GrowerMemoryKind; text: string; source?: string }
+): Promise<number> {
+  await ensureSchema();
+  const s = sql();
+  const rows = (await s`
+    INSERT INTO grower_memory (system_id, kind, text, source)
+    VALUES (${systemId}, ${entry.kind}, ${entry.text}, ${entry.source ?? "grower"})
+    RETURNING id
+  `) as unknown as Array<{ id: number }>;
+  return Number(rows[0].id);
+}
+
+export async function getGrowerMemory(
+  systemId: string,
+  limit = 30
+): Promise<GrowerMemoryEntry[]> {
+  await ensureSchema();
+  const s = sql();
+  const rows = (await s`
+    SELECT id, ts, kind, text, source
+    FROM grower_memory
+    WHERE system_id = ${systemId} AND active = TRUE
+    ORDER BY ts DESC
+    LIMIT ${limit}
+  `) as unknown as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    id: Number(r.id),
+    ts: new Date(r.ts as string),
+    kind: r.kind as GrowerMemoryKind,
+    text: r.text as string,
+    source: r.source as string,
+  }));
+}
+
+/** Soft-delete a memory the grower retracted. Returns the number of rows hit. */
+export async function deactivateGrowerMemory(
+  systemId: string,
+  id: number
+): Promise<void> {
+  await ensureSchema();
+  const s = sql();
+  await s`UPDATE grower_memory SET active = FALSE WHERE id = ${id} AND system_id = ${systemId}`;
 }
 
 export async function archiveSystem(id: string): Promise<void> {
