@@ -16,6 +16,7 @@ import type { ChannelBottleStatus } from "./bottle-status";
 import type { TargetRanges } from "./tolerance";
 import { evaluateMetric, bandWidth } from "./tolerance";
 import { renderGrowContext, type GrowProfile } from "./grow-profile";
+import { renderGrowerMemory, type GrowerMemoryEntry } from "./grower-memory";
 import { TELOS_VOICE_PROMPT } from "../brand/voice";
 
 export const SYSTEM_PROMPT = TELOS_VOICE_PROMPT + `
@@ -386,6 +387,8 @@ export function buildUserPrompt(opts: {
   diurnal?: { period: string; expected_ph_drift: string };
   /** The personal Brain of this grow (Grow Context layer) — onboarding answers. */
   growProfile?: GrowProfile | null;
+  /** Grower Memory — facts/corrections/preferences the grower has taught the Brain. */
+  growerMemory?: GrowerMemoryEntry[] | null;
   pendingTasks: Pick<HumanTask, "id" | "type" | "priority" | "title" | "created_at">[];
 }): string {
   const {
@@ -401,6 +404,7 @@ export function buildUserPrompt(opts: {
     targets,
     diurnal,
     growProfile,
+    growerMemory,
     pendingTasks,
   } = opts;
   const sections: string[] = [];
@@ -425,6 +429,13 @@ export function buildUserPrompt(opts: {
   // still unknown so the brain asks rather than guesses).
   sections.push(renderGrowContext(growProfile));
   sections.push("");
+
+  // Grower Memory — what the grower has taught the Brain (omitted when empty).
+  const memorySection = renderGrowerMemory(growerMemory);
+  if (memorySection) {
+    sections.push(memorySection);
+    sections.push("");
+  }
 
   // CRITICAL safety context — the brain must know whether its proposals
   // will execute or queue, and which bottles can actually deliver liquid.

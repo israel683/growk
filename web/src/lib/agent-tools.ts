@@ -19,8 +19,12 @@ import {
   setDoserVerified,
   verifyBottleLevel,
   setDeviceSource,
+  addGrowerMemory,
+  getGrowerMemory,
+  deactivateGrowerMemory,
   DEFAULT_SYSTEM_ID,
 } from "./db";
+import { GROWER_MEMORY_KINDS } from "./grower-memory";
 import { getBottleStatusReport } from "./bottle-status";
 import { readTuyaSensor } from "./devices/tuya";
 import { doseChannelByPhysical } from "./devices/jebao";
@@ -1128,6 +1132,60 @@ export async function buildAgentTools(systemId: string = DEFAULT_SYSTEM_ID) {
               ? "Ask the grower these ONE at a time (use askGrower for closed-set ones), then persist each answer with recordGrowProfile."
               : "Onboarding is complete — the personal Brain of this grow is established.",
         };
+      },
+    }),
+
+    rememberFact: tool({
+      description:
+        "Persist something the grower TAUGHT you about this grow into Grower Memory — a fact, a correction, or a preference that should inform every future cycle. " +
+        "Use this whenever the grower tells you something durable that isn't a fixed onboarding field: 'the east row always reads 0.3 pH higher', 'I never dose on Shabbat', 'last summer this cultivar bolted at 28°C here', or corrects the Brain ('that EC is normal for me, stop flagging it'). " +
+        "This is the memory that makes the Brain THIS grower's Brain over time. It is authoritative over general knowledge but never over safety. Phrase `text` in the grower's language (Hebrew).",
+      inputSchema: z.object({
+        kind: z
+          .enum(["fact", "correction", "preference"])
+          .describe("fact = something true about this grow; correction = fixing the Brain's wrong assumption; preference = how the grower wants things done"),
+        text: z.string().describe("The thing to remember, in Hebrew, in the grower's words"),
+      }),
+      execute: async ({ kind, text }) => {
+        const id = await addGrowerMemory(systemId, { kind, text, source: "grower" });
+        return {
+          ok: true,
+          id,
+          kind,
+          note: "Remembered. From the next cycle on, the Brain reasons with this in mind for this grow.",
+        };
+      },
+    }),
+
+    listMemory: tool({
+      description:
+        "List what the grower has taught the Brain about this grow (active Grower Memory). Use when the grower asks 'what do you know about my grow', before asking something you may already have been told, or when deciding whether a new statement is already remembered.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const entries = await getGrowerMemory(systemId);
+        return {
+          system_id: systemId,
+          count: entries.length,
+          memory: entries.map((e) => ({
+            id: e.id,
+            ts: e.ts.toISOString(),
+            kind: e.kind,
+            text: e.text,
+          })),
+          kinds: GROWER_MEMORY_KINDS,
+        };
+      },
+    }),
+
+    forgetMemory: tool({
+      description:
+        "Retract a Grower Memory entry the grower says is no longer true (soft-delete). Use when the grower corrects or cancels something previously remembered — e.g. 'forget that I top up on Sundays, I changed it'. Find the id via listMemory first.",
+      inputSchema: z.object({
+        id: z.number().int().describe("The memory entry id (from listMemory)"),
+      }),
+      execute: async ({ id }) => {
+        await deactivateGrowerMemory(systemId, id);
+        return { ok: true, id, note: "Retracted. The Brain will stop using this from the next cycle." };
       },
     }),
 

@@ -18,7 +18,7 @@ import { allChannelKeys, getDosingConfig, type DosingConfig } from "./dosing-con
 import { getProfile } from "./fertilizer-profiles";
 import { getPrimingState, type PrimingState } from "./priming";
 import { getBottleStatusReport } from "./bottle-status";
-import { getSystem } from "./db";
+import { getSystem, getGrowerMemory } from "./db";
 import { getEffectiveTargets, diurnalContext } from "./tolerance";
 
 const CACHE_TTL_BETA = "extended-cache-ttl-2025-04-11";
@@ -102,6 +102,8 @@ export async function analyzeAndDecide(opts: {
   const sysRow = await getSystem(systemId);
   const targets = sysRow ? getEffectiveTargets(sysRow) : undefined;
   const diurnal = diurnalContext();
+  // Grower Memory — what the grower has taught the Brain about this grow.
+  const growerMemory = await getGrowerMemory(systemId);
 
   const userPrompt = buildUserPrompt({
     current: opts.current,
@@ -116,6 +118,7 @@ export async function analyzeAndDecide(opts: {
     targets,
     diurnal,
     growProfile: sysRow?.grow_profile ?? null,
+    growerMemory,
     pendingTasks: opts.pendingTasks.map((t) => ({
       id: t.id,
       type: t.type,
