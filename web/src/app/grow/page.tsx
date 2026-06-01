@@ -102,8 +102,21 @@ function OnboardingChecklist({
     border: "none",
     cursor: "pointer",
   };
+  const pillGhost: React.CSSProperties = {
+    fontSize: ".78rem",
+    padding: "6px 14px",
+    borderRadius: 999,
+    background: "transparent",
+    color: "var(--c-basil)",
+    fontWeight: 500,
+    border: "1px solid color-mix(in srgb, var(--c-basil) 45%, transparent)",
+    cursor: "pointer",
+    flex: "none",
+    whiteSpace: "nowrap",
+  };
   const inputStyle: React.CSSProperties = {
     flex: 1,
+    minWidth: 160,
     fontSize: ".9rem",
     borderRadius: 8,
     padding: "8px 12px",
@@ -117,25 +130,40 @@ function OnboardingChecklist({
       {unanswered.map((q) => {
         const open = openId === q.id;
         const working = busy === q.id;
+        const toggle = () => { setOpenId(open ? null : q.id); setDraft(""); setErr(null); };
         return (
-          <li key={q.id} style={{ fontSize: ".9rem", color: "var(--c-fog)", lineHeight: 1.5 }}>
-            <button
-              onClick={() => { setOpenId(open ? null : q.id); setDraft(""); setErr(null); }}
-              style={{
-                display: "flex", alignItems: "baseline", gap: 8, width: "100%", textAlign: "start",
-                background: "none", border: "none", padding: 0, cursor: "pointer",
-                color: open ? "var(--c-parchment)" : "var(--c-fog)", font: "inherit",
-              }}
-            >
-              <span style={{ color: "var(--amber)" }}>{open ? "▾" : "•"}</span>
-              <span>
-                {q.question}
-                {q.required ? <span style={{ color: "var(--amber)" }}> *</span> : null}
-              </span>
-            </button>
+          <li
+            key={q.id}
+            style={{
+              borderRadius: 10,
+              border: "1px solid color-mix(in srgb, var(--c-parchment) 8%, transparent)",
+              background: "var(--ground-warm)",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
+              <button
+                onClick={toggle}
+                style={{
+                  flex: 1, display: "flex", alignItems: "baseline", gap: 8, textAlign: "start",
+                  background: "none", border: "none", padding: 0, cursor: "pointer",
+                  color: open ? "var(--c-parchment)" : "var(--c-fog)", font: "inherit",
+                  fontSize: ".9rem", lineHeight: 1.5,
+                }}
+              >
+                <span style={{ color: "var(--amber)" }}>{open ? "▾" : "•"}</span>
+                <span>
+                  {q.question}
+                  {q.required ? <span style={{ color: "var(--amber)" }}> *</span> : null}
+                </span>
+              </button>
+              <button onClick={toggle} style={pillGhost}>
+                {open ? t("Close", "סגור") : t("Answer", "ענה")}
+              </button>
+            </div>
 
             {open && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, paddingInlineStart: 16 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: "0 12px 12px" }}>
                 {q.type === "choice" && q.choices ? (
                   q.choices.map((c) => (
                     <button key={c} onClick={() => submit(q.id, c)} disabled={working} style={{ ...pill, opacity: working ? 0.5 : 1 }}>
@@ -155,7 +183,7 @@ function OnboardingChecklist({
                       style={inputStyle}
                     />
                     <button onClick={() => submit(q.id, draft)} disabled={working || !draft.trim()} style={{ ...pill, opacity: working || !draft.trim() ? 0.45 : 1 }}>
-                      {working ? "…" : t("Answer", "ענה")}
+                      {working ? "…" : t("Save", "שמור")}
                     </button>
                   </>
                 )}
