@@ -51,6 +51,14 @@ export type ProposedTask = {
 export type DecisionResult = {
   commands: ApprovedCommand[];
   blocked_commands: BlockedCommand[];
+  /**
+   * Every dose the Brain proposed this cycle (structurally valid channel +
+   * amount), INDEPENDENT of whether safety approved it. Used to surface a
+   * recommendation to the grower even when the autonomous safety caps blocked
+   * it — under manual dosing the grower executes by hand, so a capped proposal
+   * must still become a dose_approval task, not vanish.
+   */
+  proposed_doses: ApprovedCommand[];
   human_tasks: ProposedTask[];
   analysis: string;
   message: string;
@@ -167,6 +175,7 @@ export async function analyzeAndDecide(opts: {
 
   const approved: ApprovedCommand[] = [];
   const blocked: BlockedCommand[] = [];
+  const proposedDoses: ApprovedCommand[] = [];
 
   const actions = Array.isArray(aiDecision.actions) ? aiDecision.actions : [];
   for (const a of actions) {
@@ -192,6 +201,9 @@ export async function analyzeAndDecide(opts: {
       amount_ml: amountMl,
       reason: String(action.reason || "AI recommended"),
     };
+    // Record the proposal regardless of safety — so a needed-but-capped dose
+    // still reaches the grower as a recommendation under manual dosing.
+    proposedDoses.push(cmd);
     const v = await validateCommand(cmd, opts.current, { systemId, dosingConfig });
     if (v.ok) approved.push(cmd);
     else blocked.push({ command: `Dose ${cmd.amount_ml}ml of ${cmd.channel}`, reason: v.reason });
@@ -213,10 +225,14 @@ export async function analyzeAndDecide(opts: {
     // hours for the same persistent concern (#37→#45→#47→#48 in 4 days).
     // dose_approval / question types use a tighter 4h window because
     // they're more legitimately repeatable.
+    // Suppress a new task only if one of the same type is still PENDING (Layer
+    // 1 / the live check below) OR was RESOLVED very recently — so a persistent
+    // real need resurfaces instead of going silent for a day. hasRecentTaskOfType
+    // now blocks on pending-of-any-age OR resolved-within-window.
     const reuseWindowHours =
       type === "manual_action" || type === "water_change" || type === "system_reset"
-        ? 24
-        : 4;
+        ? 6
+        : 3;
     if (await hasRecentTaskOfType(type as TaskType, reuseWindowHours, systemId)) {
       continue;
     }
@@ -244,6 +260,7 @@ export async function analyzeAndDecide(opts: {
   return {
     commands: approved,
     blocked_commands: blocked,
+    proposed_doses: proposedDoses,
     human_tasks: tasks,
     analysis: String(aiDecision.analysis || ""),
     message: String(aiDecision.message_to_grower || ""),
@@ -278,6 +295,7 @@ function fallback(reason: string): DecisionResult {
   return {
     commands: [],
     blocked_commands: [],
+    proposed_doses: [],
     human_tasks: [],
     analysis: `AI unavailable: ${reason}. Maintaining current state.`,
     message: "המערכת עובדת במצב שמרני — ה-AI לא זמין כרגע",

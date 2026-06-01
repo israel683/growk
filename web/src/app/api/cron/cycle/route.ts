@@ -30,6 +30,7 @@ import {
   decrementBottle,
   getLastCronChatPush,
   addEpisode,
+  hasRecentTaskOfType,
 } from "@/lib/db";
 import { analyzeAndDecide } from "@/lib/brain";
 import { doseChannelByPhysical } from "@/lib/devices/jebao";
@@ -207,35 +208,47 @@ export async function GET(req: Request) {
         // brain ran overnight, burned through pH Down and nutrients, and
         // the grower woke up to empty bottles.
         if (!sys.autonomous_dosing_enabled) {
-          for (const cmd of decision.commands) {
-            try {
-              await createHumanTask(
-                {
-                  type: "dose_approval",
-                  priority: "high",
-                  title: `אישור מנה: ${cmd.channel} ${cmd.amount_ml}ml`,
-                  reason:
-                    `המוח האוטונומי מציע ${cmd.amount_ml}ml ב-${cmd.channel}. ` +
-                    `הסיבה: ${cmd.reason}. דישון אוטונומי כבוי במערכת — לחיצה על "אשר ובצע" תפעיל את המשאבה.`,
-                  payload: {
-                    channel: cmd.channel,
-                    amount_ml: cmd.amount_ml,
-                    reason_en: cmd.reason,
-                    source: "cron-cycle-autonomous-disabled",
+          // Surface the Brain's proposed doses to the grower as dose_approval
+          // tasks — using `proposed_doses` (every dose it recommended), NOT just
+          // the safety-approved `commands`. Under manual dosing the grower acts
+          // by hand, so a dose the autonomous caps blocked is still a valid
+          // recommendation that MUST reach them — not vanish silently. Guard
+          // against re-spawning every 2h: skip if a dose_approval is already
+          // pending or was raised in the last 3h.
+          const dupePending = await hasRecentTaskOfType("dose_approval", 3, sys.id);
+          for (const cmd of decision.proposed_doses) {
+            if (!dupePending) {
+              try {
+                await createHumanTask(
+                  {
+                    type: "dose_approval",
+                    priority: "high",
+                    title: `אישור מנה: ${cmd.channel} ${cmd.amount_ml}ml`,
+                    reason:
+                      `המוח ממליץ ${cmd.amount_ml}ml ב-${cmd.channel}. ` +
+                      `הסיבה: ${cmd.reason}. דישון מתבצע ידנית — בצע/י את המנה ואז סמן/י "בוצע", או "בטל" אם לא רלוונטי.`,
+                    payload: {
+                      channel: cmd.channel,
+                      amount_ml: cmd.amount_ml,
+                      reason_en: cmd.reason,
+                      source: "cron-cycle-manual-dosing",
+                    },
+                    expires_in_hours: 8,
+                    decision_id: decisionId,
                   },
-                  expires_in_hours: 4,
-                  decision_id: decisionId,
-                },
-                sys.id
-              );
-            } catch (e) {
-              console.error(`[cron/cycle] failed to create dose_approval task: ${e}`);
+                  sys.id
+                );
+              } catch (e) {
+                console.error(`[cron/cycle] failed to create dose_approval task: ${e}`);
+              }
             }
             executed.push({
               channel: cmd.channel,
               amount_ml: cmd.amount_ml,
               success: false,
-              error: "autonomous_dosing_enabled=false — proposal queued as dose_approval",
+              error: dupePending
+                ? "manual dosing — dose_approval already pending/recent"
+                : "manual dosing — recommendation queued as dose_approval task",
             });
           }
         } else {
