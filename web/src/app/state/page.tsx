@@ -11,12 +11,10 @@ import {
 import type { StateResponse, HumanTask, AgentStatus } from "@/lib/types";
 import { SensorChart } from "@/components/SensorChart";
 import { BottleLevels } from "@/components/BottleLevels";
+import { useLang, statusLabel } from "@/lib/i18n";
 
 const REFRESH_MS = 5_000;
 
-const STATUS_LABEL: Record<AgentStatus, string> = {
-  healthy: "תקין", attention: "לב", warning: "אזהרה", critical: "קריטי", unknown: "לא ידוע",
-};
 const STATUS_DOT: Record<AgentStatus, string> = {
   healthy: "var(--c-basil)", attention: "var(--c-terra)", warning: "var(--c-terra)",
   critical: "var(--c-terra)", unknown: "var(--c-stone)",
@@ -33,6 +31,7 @@ const STAGE_LABEL: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  const { t, lang } = useLang();
   const [state, setState] = useState<StateResponse | null>(null);
   const [tasks, setTasks] = useState<HumanTask[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +68,7 @@ export default function Dashboard() {
     refresh();
   }
 
-  if (loading) return <main style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--c-ash)" }}>טוען נתונים…</main>;
+  if (loading) return <main style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--c-ash)" }}>{t("Loading…", "טוען נתונים…")}</main>;
   if (error || !state) {
     return (
       <main style={{ flex: 1, display: "grid", placeItems: "center", padding: 32 }}>
@@ -88,12 +87,12 @@ export default function Dashboard() {
   const stage = STAGE_LABEL[sp.growth_stage] ?? sp.growth_stage;
 
   return (
-    <main dir="rtl" style={{ maxWidth: 1180, width: "100%", margin: "0 auto", padding: "1.6rem clamp(0.9rem,3vw,1.6rem) 4rem", display: "flex", flexDirection: "column", gap: 16 }}>
+    <main dir={lang === "he" ? "rtl" : "ltr"} style={{ maxWidth: 1180, width: "100%", margin: "0 auto", padding: "1.6rem clamp(0.9rem,3vw,1.6rem) 4rem", display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Topbar */}
       <header style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 style={{ fontFamily: "var(--f-display)", fontWeight: 300, fontSize: "clamp(1.9rem,3.5vw,2.6rem)", color: "var(--c-parchment)", lineHeight: 1, letterSpacing: "-.01em" }}>
-            לוח בקרה
+            {t("Dashboard", "לוח בקרה")}
           </h1>
           <p style={{ fontSize: ".82rem", color: "var(--c-ash)", marginTop: 8 }}>
             {sp.crop_type} · {sp.reservoir_liters}L · {sp.location} · שלב {stage}
@@ -102,7 +101,7 @@ export default function Dashboard() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: ".62rem", letterSpacing: ".16em", textTransform: "uppercase", color: "var(--c-ash)" }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: STATUS_DOT[status], boxShadow: `0 0 0 3px ${STATUS_DOT[status]}22` }} />
-          {STATUS_LABEL[status]}
+          {statusLabel(status, t)}
         </div>
       </header>
 

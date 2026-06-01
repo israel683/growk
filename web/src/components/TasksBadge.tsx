@@ -17,10 +17,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getTasks } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 
 const POLL_MS = 15_000;
 
 export function TasksBadge() {
+  const { t } = useLang();
   const [approval, setApproval] = useState(0);
   const [hands, setHands] = useState(0);
   const [error, setError] = useState(false);
@@ -65,7 +67,7 @@ export function TasksBadge() {
           >
             {approval}
           </span>
-          <span className="hidden sm:inline" style={{ color: "var(--c-fog)" }}>לאישור</span>
+          <span className="hidden sm:inline" style={{ color: "var(--c-fog)" }}>{t("to approve", "לאישור")}</span>
         </span>
       )}
       {approval > 0 && hands > 0 && (
@@ -79,7 +81,7 @@ export function TasksBadge() {
           >
             {hands}
           </span>
-          <span className="hidden sm:inline" style={{ color: "var(--c-fog)" }}>פיזי</span>
+          <span className="hidden sm:inline" style={{ color: "var(--c-fog)" }}>{t("hands-on", "פיזי")}</span>
         </span>
       )}
     </Link>
