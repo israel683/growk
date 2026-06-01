@@ -1197,11 +1197,24 @@ export async function completeTask(
 ): Promise<void> {
   await ensureSchema();
   const s = sql();
-  await s`
+  const rows = (await s`
     UPDATE human_tasks
     SET status = 'done', completed_at = NOW(), user_response = ${response}
     WHERE id = ${id} AND system_id = ${systemId}
-  `;
+    RETURNING type, title
+  `) as unknown as Array<{ type: string; title: string }>;
+  // Log to episodic memory so there's a visible record AND the Brain sees that
+  // the grower acted on it next cycle (closes the feedback loop).
+  if (rows[0]) {
+    try {
+      await addEpisode(systemId, {
+        status: null,
+        summary: `Grower DID task "${rows[0].title}"${response ? ` — "${response}"` : ""}.`,
+      });
+    } catch (e) {
+      console.error("[completeTask] addEpisode failed:", e);
+    }
+  }
 }
 
 export async function dismissTask(
@@ -1211,11 +1224,24 @@ export async function dismissTask(
 ): Promise<void> {
   await ensureSchema();
   const s = sql();
-  await s`
+  const rows = (await s`
     UPDATE human_tasks
     SET status = 'dismissed', completed_at = NOW(), user_response = ${response}
     WHERE id = ${id} AND system_id = ${systemId}
-  `;
+    RETURNING type, title
+  `) as unknown as Array<{ type: string; title: string }>;
+  // A dismissal is signal, not silence: log it so it's on the record and the
+  // Brain knows the grower declined this (and shouldn't blindly re-nag).
+  if (rows[0]) {
+    try {
+      await addEpisode(systemId, {
+        status: null,
+        summary: `Grower DECLINED task "${rows[0].title}"${response ? ` — "${response}"` : ""}.`,
+      });
+    } catch (e) {
+      console.error("[dismissTask] addEpisode failed:", e);
+    }
+  }
 }
 
 export async function expireOldTasks(
@@ -1368,11 +1394,16 @@ export async function hasRecentTaskOfType(
   await ensureSchema();
   const s = sql();
   const cutoff = new Date(Date.now() - hoursWindow * 60 * 60 * 1000).toISOString();
+  // Suppress a duplicate only if a same-type task is STILL PENDING (any age —
+  // never stack two open tasks for the same concern) OR one was created within
+  // the recent window (covers a just-resolved/dismissed task so we don't re-nag
+  // immediately). A persistent need therefore resurfaces after the short window
+  // instead of going silent for a full day.
   const rows = (await s`
     SELECT 1 FROM human_tasks
     WHERE system_id = ${systemId}
       AND type = ${t}
-      AND created_at > ${cutoff}
+      AND (status = 'pending' OR created_at > ${cutoff})
     LIMIT 1
   `) as unknown as Array<unknown>;
   return rows.length > 0;
