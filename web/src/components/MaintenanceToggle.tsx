@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getActiveSystem } from "@/lib/system";
 import { patchSystem } from "@/lib/api";
+import { useLang } from "@/lib/i18n";
 
 /**
  * Pause / resume the system (maintenance mode). Rendered as a row inside the
@@ -10,6 +11,7 @@ import { patchSystem } from "@/lib/api";
  * stops taking autonomous decisions until resumed.
  */
 export function MaintenanceToggle() {
+  const { t } = useLang();
   const [status, setStatus] = useState<"active" | "paused" | "archived" | "loading">("loading");
   const [busy, setBusy] = useState(false);
 
@@ -61,7 +63,7 @@ export function MaintenanceToggle() {
       style={{ color: isPaused ? "var(--c-basil)" : "var(--c-fog)" }}
     >
       <i className={"ph-light " + (isPaused ? "ph-play" : "ph-pause")} style={{ fontSize: "1.05rem", color: isPaused ? "var(--c-basil)" : "var(--amber)" }} />
-      {isPaused ? "חזרה לפעולה" : "השהיית המערכת"}
+      {isPaused ? t("Resume", "חזרה לפעולה") : t("Pause system", "השהיית המערכת")}
     </button>
   );
 }

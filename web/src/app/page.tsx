@@ -7,14 +7,15 @@ import ReactMarkdown from "react-markdown";
 import { getActiveSystem } from "@/lib/system";
 import { StackedQuestion } from "@/components/StackedQuestion";
 import { PendingTasksCard } from "@/components/PendingTasksCard";
+import { useLang } from "@/lib/i18n";
 
 // Starters phrased in TELOS voice — short, specific, factual.
 // "Always specific.  Day 21, not 'how's it going'."  See brand/voice.ts.
-const STARTERS = [
-  "מה הקריאה עכשיו",
-  "מה השתנה ב-6 השעות האחרונות",
-  "פירוט מנות היום",
-  "צריך לפעול במשהו",
+const STARTERS: [string, string][] = [
+  ["What's the reading now", "מה הקריאה עכשיו"],
+  ["What changed in the last 6 hours", "מה השתנה ב-6 השעות האחרונות"],
+  ["Today's dosing breakdown", "פירוט מנות היום"],
+  ["Anything to act on", "צריך לפעול במשהו"],
 ];
 
 type HistoryMessage = {
@@ -28,6 +29,7 @@ type HistoryMessage = {
 };
 
 export default function ChatPage() {
+  const { t } = useLang();
   const [activeSystem, setActiveSystemState] = useState<string>("default");
   const [historyLoaded, setHistoryLoaded] = useState(false);
   // Per-system info needed to branch the empty-state UI:
@@ -376,21 +378,24 @@ export default function ChatPage() {
               שאל. אענה מהדאטה.
             </p>
             <div className="mt-8 grid sm:grid-cols-2 gap-2 max-w-lg mx-auto">
-              {STARTERS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => handleSubmit(s)}
-                  className="text-right text-sm p-3 rounded-md border border-[rgba(238,237,232,0.12)] bg-[var(--c-soil)] hover:bg-[var(--c-earth)] hover:border-[rgba(137,168,62,0.25)] text-[var(--c-fog)] transition-colors"
-                >
-                  {s}
-                </button>
-              ))}
+              {STARTERS.map((s) => {
+                const label = t(s[0], s[1]);
+                return (
+                  <button
+                    key={s[1]}
+                    onClick={() => handleSubmit(label)}
+                    className="text-sm p-3 rounded-md border border-[rgba(238,237,232,0.12)] bg-[var(--c-soil)] hover:bg-[var(--c-earth)] hover:border-[rgba(137,168,62,0.25)] text-[var(--c-fog)] transition-colors"
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
         {!historyLoaded && (
-          <div className="text-center text-[var(--c-ash)] text-sm pt-12">טוען היסטוריה...</div>
+          <div className="text-center text-[var(--c-ash)] text-sm pt-12">{t("Loading history…", "טוען היסטוריה...")}</div>
         )}
 
         {messages.map((m, idx) => {
@@ -531,7 +536,7 @@ export default function ChatPage() {
               }
             }}
             rows={1}
-            placeholder="כתוב הודעה..."
+            placeholder={t("Write a message…", "כתוב הודעה...")}
             disabled={isStreaming}
             className="flex-1 resize-none bg-[var(--c-soil)] border border-[rgba(238,237,232,0.07)] text-[var(--c-parchment)] placeholder:text-[var(--c-stone)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[rgba(137,168,62,0.45)] focus:ring-1 focus:ring-[rgba(137,168,62,0.25)] disabled:opacity-50"
             style={{ minHeight: 40, maxHeight: 160 }}
@@ -541,7 +546,7 @@ export default function ChatPage() {
             disabled={(!input.trim() && attachedFiles.length === 0) || isStreaming}
             className="px-4 py-2 rounded-full bg-[var(--c-basil)] hover:brightness-110 text-[var(--c-void)] text-sm font-medium disabled:bg-[var(--c-bark)] disabled:text-[var(--c-stone)] disabled:cursor-not-allowed min-h-[40px] sm:min-h-0 tracking-wide transition-all"
           >
-            שלח
+            {t("Send", "שלח")}
           </button>
         </form>
       </div>

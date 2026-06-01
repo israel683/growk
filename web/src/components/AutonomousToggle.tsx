@@ -11,10 +11,12 @@
 import { useEffect, useState } from "react";
 import { listSystems, setAutonomousDosing, type SystemSummary } from "@/lib/api";
 import { getActiveSystem } from "@/lib/system";
+import { useLang } from "@/lib/i18n";
 
 const POLL_MS = 15_000;
 
 export function AutonomousToggle() {
+  const { t } = useLang();
   const [sys, setSys] = useState<SystemSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export function AutonomousToggle() {
 
   const icon = on ? "ph-brain" : verified ? "ph-hand-pointing" : "ph-warning-circle";
   const color = on ? "var(--c-basil)" : verified ? "var(--amber)" : "var(--c-stone)";
-  const label = on ? "אוטונומי" : "ידני";
+  const label = on ? t("Autonomous", "אוטונומי") : t("Manual", "ידני");
 
   return (
     <button

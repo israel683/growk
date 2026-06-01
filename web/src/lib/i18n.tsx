@@ -65,6 +65,19 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   return <LangContext.Provider value={{ lang, setLang, t }}>{children}</LangContext.Provider>;
 }
 
+/** Shared status-word translations (used by the chip, dashboard, decisions, chat). */
+const STATUS_WORDS: Record<string, [string, string]> = {
+  healthy: ["Healthy", "תקין"],
+  attention: ["Attention", "לב"],
+  warning: ["Warning", "אזהרה"],
+  critical: ["Critical", "קריטי"],
+  unknown: ["—", "—"],
+};
+export function statusLabel(status: string, t: (en: string, he: string) => string): string {
+  const w = STATUS_WORDS[status] ?? STATUS_WORDS.unknown;
+  return t(w[0], w[1]);
+}
+
 export function useLang(): Ctx {
   const ctx = useContext(LangContext);
   // Safe fallback if a component renders outside the provider (e.g. tests):

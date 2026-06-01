@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getActiveSystem } from "@/lib/system";
+import { useLang, statusLabel } from "@/lib/i18n";
 
 type StatusInfo = {
   systemStatus: "active" | "paused" | "archived" | null;
@@ -23,6 +24,7 @@ const DECISION_STYLE: Record<string, { dot: string; label: string }> = {
 };
 
 export function StatusChip({ onRequestStatus }: { onRequestStatus?: () => void }) {
+  const { t } = useLang();
   const [info, setInfo] = useState<StatusInfo | null>(null);
 
   async function load() {
@@ -53,7 +55,7 @@ export function StatusChip({ onRequestStatus }: { onRequestStatus?: () => void }
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs px-2 py-1 rounded-sm border border-[rgba(238,237,232,0.07)] bg-[var(--c-soil)] text-[var(--c-stone)]">
         <span className="inline-block w-2 h-2 rounded-full bg-[var(--c-stone)] animate-pulse" />
-        טוען
+        {t("Loading", "טוען")}
       </span>
     );
   }
@@ -62,7 +64,7 @@ export function StatusChip({ onRequestStatus }: { onRequestStatus?: () => void }
   if (info.systemStatus === "paused") {
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs px-2 py-1 rounded-sm border border-[rgba(168,89,58,0.25)] bg-[rgba(168,89,58,0.08)] text-[var(--c-terra)] font-medium">
-        בתחזוקה
+        {t("Maintenance", "בתחזוקה")}
       </span>
     );
   }
@@ -70,7 +72,7 @@ export function StatusChip({ onRequestStatus }: { onRequestStatus?: () => void }
   if (info.systemStatus === "archived") {
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs px-2 py-1 rounded-sm border border-[rgba(238,237,232,0.07)] bg-[var(--c-soil)] text-[var(--c-stone)]">
-        ארוכב
+        {t("Archived", "בארכיון")}
       </span>
     );
   }
@@ -82,7 +84,7 @@ export function StatusChip({ onRequestStatus }: { onRequestStatus?: () => void }
         onClick={onRequestStatus}
         className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs px-2 py-1 rounded-sm border border-[rgba(137,168,62,0.25)] bg-[rgba(137,168,62,0.06)] text-[var(--c-basil)] font-medium hover:bg-[rgba(137,168,62,0.12)] transition-colors"
       >
-        סטטוס ←
+        {t("Status →", "סטטוס ←")}
       </button>
     );
   }
@@ -92,7 +94,7 @@ export function StatusChip({ onRequestStatus }: { onRequestStatus?: () => void }
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs px-2 py-1 rounded-sm border border-[rgba(238,237,232,0.07)] bg-[var(--c-soil)]">
       <span className={`inline-block w-2 h-2 rounded-full ${style.dot}`} />
-      <span className="text-[var(--c-fog)] font-medium">{style.label}</span>
+      <span className="text-[var(--c-fog)] font-medium">{statusLabel(ds, t)}</span>
     </span>
   );
 }

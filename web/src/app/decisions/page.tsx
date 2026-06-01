@@ -3,14 +3,7 @@
 import { useEffect, useState } from "react";
 import { getDecisions } from "@/lib/api";
 import type { DecisionRow, AgentStatus } from "@/lib/types";
-
-const STATUS_LABEL: Record<AgentStatus, string> = {
-  healthy: "תקין",
-  attention: "לב",
-  warning: "אזהרה",
-  critical: "קריטי",
-  unknown: "לא ידוע",
-};
+import { useLang, statusLabel } from "@/lib/i18n";
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
   healthy: "var(--c-basil)",
@@ -26,6 +19,7 @@ function statusPill(status: AgentStatus): React.CSSProperties {
 }
 
 export default function DecisionsPage() {
+  const { t } = useLang();
   const [decisions, setDecisions] = useState<DecisionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +60,7 @@ export default function DecisionsPage() {
   }
 
   if (loading) {
-    return <main className="flex-1 grid place-items-center text-[var(--c-ash)]">טוען...</main>;
+    return <main className="flex-1 grid place-items-center text-[var(--c-ash)]">{t("Loading…", "טוען...")}</main>;
   }
   if (error) {
     return (
@@ -80,10 +74,10 @@ export default function DecisionsPage() {
     <main className="flex-1 max-w-6xl w-full mx-auto p-6">
       <header className="mb-5">
         <h1 style={{ fontFamily: "var(--f-display)", fontWeight: 300, fontSize: "clamp(1.9rem,3.5vw,2.6rem)", color: "var(--c-parchment)", lineHeight: 1, letterSpacing: "-.01em" }}>
-          היסטוריית החלטות
+          {t("Decision history", "היסטוריית החלטות")}
         </h1>
         <p className="text-sm text-[var(--c-ash)]" style={{ marginTop: 8 }}>
-          {decisions.length} ניתוחים אחרונים. כל שורה ניתנת להרחבה לתצוגת פירוט מלאה.
+          {decisions.length} {t("recent analyses. Each row expands to the full detail.", "ניתוחים אחרונים. כל שורה ניתנת להרחבה לתצוגת פירוט מלאה.")}
         </p>
       </header>
 
@@ -120,19 +114,19 @@ export default function DecisionsPage() {
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className="text-xs px-2 py-0.5 rounded-full" style={statusPill(status)}>
-                      {STATUS_LABEL[status]}
+                      {statusLabel(status, t)}
                     </span>
                     <span className="text-sm text-[var(--c-ash)]" dir="ltr">
                       #{d.id} · {new Date(d.timestamp).toLocaleString("he-IL")}
                     </span>
                     {actions.length > 0 && (
                       <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: "var(--c-basil)", background: "color-mix(in srgb, var(--c-basil) 14%, transparent)" }}>
-                        {actions.length} פעולות
+                        {actions.length} {t("actions", "פעולות")}
                       </span>
                     )}
                     {tasks.length > 0 && (
                       <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: "color-mix(in srgb, var(--c-mineral) 52%, var(--lit-white))", background: "color-mix(in srgb, var(--c-mineral) 22%, transparent)" }}>
-                        {tasks.length} משימות
+                        {tasks.length} {t("tasks", "משימות")}
                       </span>
                     )}
                   </div>
@@ -181,7 +175,7 @@ export default function DecisionsPage() {
                   {tasks.length > 0 && (
                     <div>
                       <h3 className="text-xs font-semibold text-[var(--c-ash)] uppercase tracking-wide mb-1">
-                        משימות שנוצרו
+                        {t("Tasks created", "משימות שנוצרו")}
                       </h3>
                       <ul className="space-y-1.5">
                         {tasks.map((t, i) => (
