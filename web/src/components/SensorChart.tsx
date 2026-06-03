@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { getReadings } from "@/lib/api";
 import { startVisibilityAwarePolling } from "@/lib/poll";
+import { useLang } from "@/lib/i18n";
 import type { WaterReading } from "@/lib/types";
 
 type MetricKey = "ph" | "ec" | "water_temp" | "orp";
@@ -21,10 +22,19 @@ const METRIC_DEFS: Record<
   MetricKey,
   { label: string; unit: string; color: string; band: [number, number] | null; digits: number }
 > = {
-  ph: { label: "pH", unit: "", color: "#10b981", band: [5.5, 6.5], digits: 2 },
-  ec: { label: "EC", unit: "μS/cm", color: "#3b82f6", band: [800, 1200], digits: 0 },
-  water_temp: { label: "טמפ' מים", unit: "°C", color: "#f59e0b", band: [18, 24], digits: 1 },
+  // Palette only (globals.css): basil for pH, fog (legible neutral on the dark
+  // ground) for EC, amber for water temp. mineral is too dark to read as a line.
+  ph: { label: "pH", unit: "", color: "#89a83e", band: [5.5, 6.5], digits: 2 },
+  ec: { label: "EC", unit: "μS/cm", color: "#c6c5be", band: [800, 1200], digits: 0 },
+  water_temp: { label: "טמפ' מים", unit: "°C", color: "#a8783c", band: [18, 24], digits: 1 },
   orp: { label: "ORP", unit: "mV", color: "#8b5cf6", band: [200, 400], digits: 0 },
+};
+
+const METRIC_LABEL: Record<MetricKey, [string, string]> = {
+  ph: ["pH", "pH"],
+  ec: ["EC", "EC"],
+  water_temp: ["Water temp", "טמפ' מים"],
+  orp: ["ORP", "ORP"],
 };
 
 const HOURS_OPTIONS: { hours: number; label: string }[] = [
@@ -35,6 +45,7 @@ const HOURS_OPTIONS: { hours: number; label: string }[] = [
 ];
 
 export function SensorChart() {
+  const { t } = useLang();
   const [metric, setMetric] = useState<MetricKey>("ph");
   const [hours, setHours] = useState<number>(24);
   const [readings, setReadings] = useState<WaterReading[]>([]);
@@ -78,35 +89,40 @@ export function SensorChart() {
   const def = METRIC_DEFS[metric];
 
   return (
-    <section className="bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-zinc-200 dark:border-zinc-800 p-4">
+    <section
+      className="rounded-lg p-4"
+      style={{ background: "var(--surface-warm)", border: "1px solid color-mix(in srgb, var(--c-parchment) 7%, transparent)" }}
+    >
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <h2 className="font-semibold">היסטוריית חיישן</h2>
+        <h2 className="font-semibold" style={{ color: "var(--c-fog)" }}>{t("Sensor history", "היסטוריית חיישן")}</h2>
         <div className="flex items-center gap-2 flex-wrap" dir="ltr">
-          <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded p-0.5">
+          <div className="flex rounded p-0.5" style={{ background: "var(--ground-warm)" }}>
             {(Object.keys(METRIC_DEFS) as MetricKey[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setMetric(m)}
-                className={`text-xs px-2 py-1 rounded transition-colors ${
+                className="text-xs px-2 py-1 rounded transition-colors"
+                style={
                   metric === m
-                    ? "bg-white dark:bg-zinc-700 shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-                }`}
+                    ? { background: "color-mix(in srgb, var(--c-basil) 16%, transparent)", color: "var(--c-parchment)" }
+                    : { color: "var(--c-ash)" }
+                }
               >
-                {METRIC_DEFS[m].label}
+                {t(...METRIC_LABEL[m])}
               </button>
             ))}
           </div>
-          <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded p-0.5">
+          <div className="flex rounded p-0.5" style={{ background: "var(--ground-warm)" }}>
             {HOURS_OPTIONS.map((opt) => (
               <button
                 key={opt.hours}
                 onClick={() => setHours(opt.hours)}
-                className={`text-xs px-2 py-1 rounded transition-colors ${
+                className="text-xs px-2 py-1 rounded transition-colors"
+                style={
                   hours === opt.hours
-                    ? "bg-white dark:bg-zinc-700 shadow-sm"
-                    : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-                }`}
+                    ? { background: "color-mix(in srgb, var(--c-basil) 16%, transparent)", color: "var(--c-parchment)" }
+                    : { color: "var(--c-ash)" }
+                }
               >
                 {opt.label}
               </button>
@@ -117,12 +133,12 @@ export function SensorChart() {
 
       <div style={{ width: "100%", height: 280 }} dir="ltr">
         {loading && data.length === 0 ? (
-          <div className="h-full grid place-items-center text-zinc-400 text-sm">
-            טוען...
+          <div className="h-full grid place-items-center text-sm" style={{ color: "var(--c-stone)" }}>
+            {t("Loading…", "טוען…")}
           </div>
         ) : data.length < 2 ? (
-          <div className="h-full grid place-items-center text-zinc-400 text-sm">
-            אין מספיק נתונים בטווח הזמן הזה
+          <div className="h-full grid place-items-center text-sm" style={{ color: "var(--c-stone)" }}>
+            {t("Not enough data in this time range", "אין מספיק נתונים בטווח הזמן הזה")}
           </div>
         ) : (
           <ResponsiveContainer>
@@ -169,8 +185,8 @@ export function SensorChart() {
       </div>
 
       {def.band && (
-        <p className="text-xs text-zinc-400 mt-2 text-center" dir="ltr">
-          Highlighted band: target range {def.band[0]}–{def.band[1]} {def.unit}
+        <p className="text-xs mt-2 text-center" style={{ color: "var(--c-stone)" }} dir="ltr">
+          {t("Shaded band = target range", "הרצועה המודגשת = טווח היעד")} {def.band[0]}–{def.band[1]} {def.unit}
         </p>
       )}
     </section>
@@ -198,8 +214,12 @@ function ChartTooltip(props: { unit: string; digits: number } & Record<string, u
   if (!active || !payload || !payload.length) return null;
   const { t, v } = payload[0].payload;
   return (
-    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded shadow-sm px-2 py-1 text-xs" dir="ltr">
-      <div className="text-zinc-500">{new Date(t).toLocaleString("he-IL")}</div>
+    <div
+      className="rounded px-2 py-1 text-xs"
+      style={{ background: "var(--c-soil)", border: "1px solid var(--c-bark)", color: "var(--c-parchment)" }}
+      dir="ltr"
+    >
+      <div style={{ color: "var(--c-stone)" }}>{new Date(t).toLocaleString("he-IL")}</div>
       <div className="font-semibold tabular-nums">
         {v.toFixed(digits)} {unit}
       </div>
