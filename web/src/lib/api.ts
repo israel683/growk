@@ -99,6 +99,17 @@ export async function getTimeline(days = 30): Promise<TimelineView> {
   return fetchJson<TimelineView>(`/api/timeline?days=${days}`);
 }
 
+export type TimelineSnapshot = {
+  /** Next planned/due event on the forward plan, or null. */
+  next: TimelineEvent | null;
+  /** The most recent thing that happened to the grow, or null. */
+  last: JournalEvent | null;
+};
+
+export async function getTimelineSnapshot(): Promise<TimelineSnapshot> {
+  return fetchJson<TimelineSnapshot>("/api/timeline?snapshot=1");
+}
+
 /**
  * Answer one onboarding question straight from the Grow screen. Merges into
  * grow_profile and returns the refreshed onboarding summary.

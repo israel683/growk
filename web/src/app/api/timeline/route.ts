@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ensureSchema, getSystem, getRecentEpisodes, getTasksByStatus } from "@/lib/db";
 import { systemIdFromRequest } from "@/lib/system-ctx";
 import { deriveTimeline } from "@/lib/grow-profile";
-import { buildJournal } from "@/lib/journal";
+import { buildJournal, episodeToJournalEvent } from "@/lib/journal";
 
 export const maxDuration = 15;
 
@@ -29,6 +29,19 @@ export async function GET(req: Request) {
     const sys = await getSystem(systemId);
     if (!sys) {
       return NextResponse.json({ error: `system "${systemId}" not found` }, { status: 404 });
+    }
+
+    // Lean snapshot for the dashboard: just the next planned event + the last
+    // thing that happened. Avoids the full journal fetch (one tiny episode read).
+    if (url.searchParams.get("snapshot")) {
+      const profile = sys.grow_profile ?? null;
+      const forward =
+        profile?.timeline && profile.timeline.length ? profile.timeline : deriveTimeline(profile);
+      const next =
+        forward.find((e) => e.status === "planned" || e.status === "due") ?? null;
+      const recent = await getRecentEpisodes(systemId, 1);
+      const last = recent[0] ? episodeToJournalEvent(recent[0]) : null;
+      return NextResponse.json({ next, last });
     }
 
     const [episodes, doneTasks, dismissedTasks, expiredTasks] = await Promise.all([

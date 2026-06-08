@@ -19,6 +19,7 @@ const SHOW_ARCHITECTURE = process.env.NEXT_PUBLIC_SHOW_ARCHITECTURE === "1";
 const LINKS = [
   { href: "/", en: "Dashboard", he: "לוח בקרה", icon: "ph-squares-four" },
   { href: "/grow", en: "The Grow", he: "הגידול", icon: "ph-plant" },
+  { href: "/grow/timeline", en: "Timeline", he: "ציר הזמן", icon: "ph-clock-countdown" },
   { href: "/chat", en: "Chat", he: "שיחה", icon: "ph-chat-circle" },
   { href: "/decisions", en: "Decisions", he: "החלטות", icon: "ph-list-checks" },
   ...(SHOW_ARCHITECTURE

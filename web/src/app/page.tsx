@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   getState,
   getTasks,
@@ -8,6 +9,8 @@ import {
   dismissTask,
   approveDoseTask,
   answerTask,
+  getTimelineSnapshot,
+  type TimelineSnapshot,
 } from "@/lib/api";
 import type { StateResponse, HumanTask, AgentStatus } from "@/lib/types";
 import { SensorChart } from "@/components/SensorChart";
@@ -57,6 +60,17 @@ export default function Dashboard() {
   useEffect(() => {
     refresh();
     return startVisibilityAwarePolling(refresh, REFRESH_MS);
+  }, []);
+
+  // Timeline snapshot — fetched on mount + when the grower returns to the tab,
+  // NOT in the 10s poll (next milestone / last action don't change that often).
+  const [snap, setSnap] = useState<TimelineSnapshot | null>(null);
+  useEffect(() => {
+    const loadSnap = () => getTimelineSnapshot().then(setSnap).catch(() => {});
+    loadSnap();
+    const onVis = () => { if (document.visibilityState === "visible") loadSnap(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
   async function handleComplete(id: number) { await completeTask(id, "marked done from dashboard"); refresh(); }
@@ -113,6 +127,33 @@ export default function Dashboard() {
           {statusLabel(status, t)}
         </div>
       </header>
+
+      {/* Timeline snapshot — next milestone + last action, links to the full tab */}
+      {snap && (snap.next || snap.last) ? (
+        <Link href="/grow/timeline" style={{ textDecoration: "none" }}>
+          <section className="tk-card hover" style={{ padding: "14px 18px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+            <i className="ph-light ph-clock-countdown" style={{ color: "var(--amber)", fontSize: "1.15rem", flex: "none" }} />
+            {snap.next ? (
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: ".6rem", letterSpacing: ".12em", textTransform: "uppercase", color: "var(--c-stone)" }}>{t("Next", "הבא")}</div>
+                <div style={{ fontSize: ".88rem", color: "var(--c-parchment)" }}>
+                  <bdi>{snap.next.title || t("Harvest", "קציר")}</bdi>
+                  {snap.next.scheduled_date ? <span dir="ltr" style={{ color: "var(--c-basil)", marginInlineStart: 6 }}>· {snap.next.scheduled_date}</span> : null}
+                </div>
+              </div>
+            ) : null}
+            {snap.last ? (
+              <div style={{ minWidth: 0, marginInlineStart: "auto", textAlign: "end" as const, maxWidth: "55%" }}>
+                <div style={{ fontSize: ".6rem", letterSpacing: ".12em", textTransform: "uppercase", color: "var(--c-stone)" }}>{t("Last", "אחרון")}</div>
+                <div style={{ fontSize: ".82rem", color: "var(--c-ash)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <bdi>{snap.last.title}</bdi>
+                </div>
+              </div>
+            ) : null}
+            <i className={"ph-light " + (lang === "he" ? "ph-arrow-left" : "ph-arrow-right")} style={{ color: "var(--c-stone)", fontSize: ".9rem", flex: "none" }} />
+          </section>
+        </Link>
+      ) : null}
 
       {/* Primary readings */}
       <div className="tk-readings">
