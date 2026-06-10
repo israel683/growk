@@ -18,8 +18,12 @@
    next/font runtime variables injected in layout.tsx. Every other token lives
    in the generated block below (source of truth: design-system/tokens.json). */
 :root {
-  --f-display: var(--font-souvenir), Georgia, 'Times New Roman', serif;
-  --f-body:    var(--font-jakarta), 'Plus Jakarta Sans', system-ui, sans-serif;
+  /* Display + body each carry their Hebrew counterpart IN the chain (like the
+     website): Latin glyphs render in Souvenir/Jakarta, Hebrew glyphs fall through
+     to Noto Serif Hebrew / Rubik per-glyph — so Hebrew HEADINGS get the elegant
+     serif instead of a generic Georgia fallback. */
+  --f-display: var(--font-souvenir), var(--font-noto-serif-hebrew), 'Noto Serif Hebrew', Georgia, 'Times New Roman', serif;
+  --f-body:    var(--font-jakarta), var(--font-rubik), 'Plus Jakarta Sans', 'Rubik', system-ui, sans-serif;
   --f-display-he: var(--font-noto-serif-hebrew), 'Noto Serif Hebrew', var(--font-souvenir), serif;
   --f-body-he:    var(--font-rubik), 'Rubik', system-ui, sans-serif;
   --f-numbers: var(--font-souvenir), Georgia, serif;
@@ -52,13 +56,13 @@
   --c-data: var(--c-mineral);
 
   /* Type scale */
-  --t-xs: 0.58rem;
-  --t-sm: 0.75rem;
-  --t-base: 0.95rem;
-  --t-md: 1.25rem;
-  --t-lg: 1.8rem;
-  --t-xl: 2.5rem;
-  --t-2xl: 4rem;
+  --t-xs: 0.62rem;
+  --t-sm: 0.8rem;
+  --t-base: 1.02rem;
+  --t-md: 1.4rem;
+  --t-lg: 2.05rem;
+  --t-xl: 2.9rem;
+  --t-2xl: 4.8rem;
 
   /* Tracking */
   --ls-tight: 0.02em;
@@ -152,6 +156,13 @@
   --font-sans:    var(--f-body);
   --font-display: var(--f-display);
   --font-mono:    ui-monospace, monospace;
+}
+
+/* Root scale-up: the app read small next to the website. Lifting the rem base
+   ~6% scales the whole type + spacing system at once toward the site's
+   generosity, without per-element edits. */
+html {
+  font-size: 17px;
 }
 
 /* TELOS is a DARK system by default.  We don't auto-switch on
