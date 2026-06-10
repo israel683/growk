@@ -13,6 +13,7 @@ import {
   type TimelineSnapshot,
 } from "@/lib/api";
 import type { StateResponse, HumanTask, AgentStatus } from "@/lib/types";
+import { harvestNounHe } from "@/lib/grow-profile";
 import { SensorChart } from "@/components/SensorChart";
 import { BottleLevels } from "@/components/BottleLevels";
 import { startVisibilityAwarePolling } from "@/lib/poll";
@@ -137,7 +138,7 @@ export default function Dashboard() {
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: ".6rem", letterSpacing: ".12em", textTransform: "uppercase", color: "var(--c-stone)" }}>{t("Next", "הבא")}</div>
                 <div style={{ fontSize: ".88rem", color: "var(--c-parchment)" }}>
-                  <bdi>{snap.next.title || t("Harvest", "קציר")}</bdi>
+                  <bdi>{snap.next.title || t("Harvest", harvestNounHe(snap.next.harvest_mode))}</bdi>
                   {snap.next.scheduled_date ? <span dir="ltr" style={{ color: "var(--c-basil)", marginInlineStart: 6 }}>· {snap.next.scheduled_date}</span> : null}
                 </div>
               </div>

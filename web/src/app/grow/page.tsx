@@ -5,7 +5,7 @@ import Link from "next/link";
 import { getGrow, answerOnboarding, type GrowView, type OnboardingView, type GrowContextField } from "@/lib/api";
 import { startVisibilityAwarePolling } from "@/lib/poll";
 import { useLang, statusLabel } from "@/lib/i18n";
-import { deriveTimeline, type TimelineEvent, type TimelineEventType, type GrowProfile } from "@/lib/grow-profile";
+import { deriveTimeline, harvestNounHe, type TimelineEvent, type TimelineEventType, type GrowProfile } from "@/lib/grow-profile";
 
 const REFRESH_MS = 15_000;
 
@@ -335,6 +335,9 @@ function GrowTimeline({ events }: { events: TimelineEvent[] }) {
     <div>
       {events.map((ev, i) => {
         const meta = TL_TYPE[ev.type];
+        // Harvest noun depends on the cultivar mode: קטיף (picking) vs קציר (terminal).
+        const label: [string, string] =
+          ev.type === "harvest" ? ["Harvest", harvestNounHe(ev.harvest_mode)] : meta.label;
         const done = ev.status === "done";
         let when = "";
         if (ev.scheduled_date && !done) {
@@ -358,9 +361,9 @@ function GrowTimeline({ events }: { events: TimelineEvent[] }) {
                   className="tk-tag"
                   style={{ color: meta.tint, background: `color-mix(in srgb, ${meta.tint} 16%, transparent)`, marginInlineEnd: 6 }}
                 >
-                  {t(...meta.label)}
+                  {t(...label)}
                 </span>
-                <b><bdi>{ev.title || t(...meta.label)}</bdi></b>
+                <b><bdi>{ev.title || t(...label)}</bdi></b>
                 {when ? <span className="by"> · {when}</span> : null}
                 {ev.instructions ? (
                   <div style={{ marginTop: 4, color: "var(--c-ash)" }}><bdi>{ev.instructions}</bdi></div>

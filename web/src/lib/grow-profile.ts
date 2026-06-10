@@ -120,6 +120,16 @@ export function timelineWindowDays(offsetDays: number): number {
 }
 
 /**
+ * The correct Hebrew harvest noun for a cultivar's harvest mode: a cut-and-come
+ * crop the plant survives → "קטיף" (picking); only a single terminal cut → "קציר"
+ * (reaping). Total over null/undefined/unknown → defaults to קטיף (the safe,
+ * non-terminal word for leafy crops). Display-only; the cultivar model is unchanged.
+ */
+export function harvestNounHe(mode: TimelineEvent["harvest_mode"] | string | null | undefined): string {
+  return mode === "single_terminal" ? "קציר" : "קטיף";
+}
+
+/**
  * Read-only timeline derived from data ALREADY on the grow profile — used by
  * /grow until the Brain maintains a stored `timeline` (PR-2). When a stored
  * timeline exists, prefer it (see the page). Pure; safe on client or server.
@@ -149,18 +159,19 @@ export function deriveTimeline(profile: GrowProfile | null | undefined): Timelin
 
   const hp = p.harvest_plan;
   if (hp && (hp.next_date || (hp.instructions && hp.instructions.trim()))) {
+    const harvestMode = (["cut_and_come_again", "repeated_pick", "single_terminal"].includes(hp.mode)
+      ? (hp.mode as TimelineEvent["harvest_mode"])
+      : null);
     events.push({
       id: "harvest-next",
       type: "harvest",
       title: "",
       scheduled_date: hp.next_date ?? null,
       window_days: 2,
-      trigger: hp.next_date ? null : "כשסימני הקציר מתקיימים",
+      trigger: hp.next_date ? null : `כשסימני ה${harvestNounHe(harvestMode)} מתקיימים`,
       status: "planned",
       source: "brain",
-      harvest_mode: (["cut_and_come_again", "repeated_pick", "single_terminal"].includes(hp.mode)
-        ? (hp.mode as TimelineEvent["harvest_mode"])
-        : null),
+      harvest_mode: harvestMode,
       instructions: hp.instructions ?? "",
       note: hp.note ?? null,
       pinned: false,

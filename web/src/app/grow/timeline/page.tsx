@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { getTimeline, type TimelineView } from "@/lib/api";
-import type { TimelineEvent, TimelineEventType } from "@/lib/grow-profile";
+import { harvestNounHe, type TimelineEvent, type TimelineEventType } from "@/lib/grow-profile";
 import type { JournalEvent, JournalTone } from "@/lib/journal";
 import { useLang } from "@/lib/i18n";
 
@@ -135,6 +135,8 @@ export default function TimelinePage() {
               <div>
                 {upcoming.map((ev: TimelineEvent) => {
                   const meta = TL_TYPE[ev.type];
+                  const label: [string, string] =
+                    ev.type === "harvest" ? ["Harvest", harvestNounHe(ev.harvest_mode)] : meta.label;
                   let when = t("when ready", "כשמוכן");
                   if (ev.scheduled_date) {
                     const d = Math.ceil((new Date(`${ev.scheduled_date}T12:00:00`).getTime() - Date.now()) / 86_400_000);
@@ -145,9 +147,9 @@ export default function TimelinePage() {
                       <div className="lt" dir="ltr">{ev.scheduled_date ?? "—"}</div>
                       <div className="lx">
                         <span className="tk-tag" style={{ color: meta.tint, background: `color-mix(in srgb, ${meta.tint} 16%, transparent)`, marginInlineEnd: 6 }}>
-                          {t(...meta.label)}
+                          {t(...label)}
                         </span>
-                        <b><bdi>{ev.title || t(...meta.label)}</bdi></b>
+                        <b><bdi>{ev.title || t(...label)}</bdi></b>
                         <span className="by"> · {when}</span>
                         {ev.note ? <div style={{ marginTop: 2, color: "var(--c-fog)" }}><bdi>{ev.note}</bdi></div> : null}
                         {ev.instructions ? <div style={{ marginTop: 4, color: "var(--c-ash)" }}><bdi>{ev.instructions}</bdi></div> : null}
