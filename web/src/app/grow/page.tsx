@@ -418,14 +418,8 @@ export default function GrowPage() {
   const stagePair = STAGE[data.system.growth_stage];
   const stage = stagePair ? t(stagePair[0], stagePair[1]) : data.system.growth_stage;
   const answered = data.onboarding.total - data.onboarding.unanswered.length;
-  // The hero speaks in the Brain's voice, so prefer the latest Brain DECISION
-  // (episodes carry a status) over task-action log lines ("grower did X",
-  // status null) — the latter aren't the Brain talking and read as noise here.
-  const latestEpisode =
-    data.episodes.find((e) => e.status)?.summary ?? data.episodes[0]?.summary;
-
   // The grow's forward+past timeline. Prefer a Brain-maintained stored timeline
-  // once it exists (PR-2); until then derive a read-only view from existing data
+  // once it exists; until then derive a read-only view from existing data
   // (the harvest plan + onboarding milestone).
   const profile = (data.grow_profile ?? null) as GrowProfile | null;
   const timelineEvents =
@@ -436,6 +430,26 @@ export default function GrowPage() {
       e.scheduled_date &&
       (new Date(`${e.scheduled_date}T12:00:00`).getTime() - Date.now()) / 86_400_000 <= 3
   );
+
+  // The hero speaks in the Brain's voice — prefer the latest Brain DECISION
+  // (status-bearing episode) over task-action log lines. BUT an episode written
+  // BEFORE the grower changed the plan is STALE: it may still say "harvest today"
+  // when the grower has since moved the date days out (the exact contradiction
+  // we hit). If the harvest was grower-moved AFTER the latest episode, drop the
+  // episode and state the CURRENT plan instead — so the hero never disagrees
+  // with the timeline below it. (One source of truth, all the way to the hero.)
+  const movedAt = profile?.harvest_plan?.grower_moved_at ?? null;
+  const heroEp = data.episodes.find((e) => e.status) ?? data.episodes[0];
+  const heroStale = !!(movedAt && heroEp && Date.parse(heroEp.ts) < Date.parse(movedAt));
+  const nextPlanned = timelineEvents.find((e) => e.status === "planned" || e.status === "due");
+  const currentStatement =
+    nextPlanned && nextPlanned.type === "harvest" && nextPlanned.scheduled_date
+      ? t(
+          `The next harvest is planned for ${nextPlanned.scheduled_date}.`,
+          `ה${harvestNounHe(nextPlanned.harvest_mode)} הבא מתוכנן ל-${nextPlanned.scheduled_date}.`
+        )
+      : null;
+  const latestEpisode = (heroStale ? null : heroEp?.summary) ?? currentStatement ?? undefined;
 
   return (
     <div dir={lang === "he" ? "rtl" : "ltr"} style={{ maxWidth: 1180, margin: "0 auto", padding: "1.6rem clamp(0.9rem,3vw,1.6rem) 4rem", display: "flex", flexDirection: "column", gap: 16 }}>

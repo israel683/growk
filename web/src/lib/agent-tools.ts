@@ -25,6 +25,7 @@ import {
   mergeGrowProfileKey,
   supersedeTask,
   supersedeTasksForEvent,
+  addEpisode,
   DEFAULT_SYSTEM_ID,
 } from "./db";
 import { GROWER_MEMORY_KINDS } from "./grower-memory";
@@ -1264,7 +1265,14 @@ export async function buildAgentTools(systemId: string = DEFAULT_SYSTEM_ID) {
           if (await supersedeTask(close_task_id, systemId, reason)) closed++;
         }
         await addGrowerMemory(systemId, { kind: "correction", text: reason_he, source: "grower" });
+        // A clear, current narrative line for the journal + the grow hero — so the
+        // newest word about this grow reflects the move (not a stale "harvest today").
         const word = harvestNounHe(harvestPlan.mode);
+        try {
+          await addEpisode(systemId, { status: null, summary: `ה${word} עודכן ל-${next_date} לבקשת המגדל.` });
+        } catch (e) {
+          console.error("[adjustHarvestPlan] addEpisode failed:", e);
+        }
         return {
           ok: true,
           next_date,
