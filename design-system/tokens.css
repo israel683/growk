@@ -3,8 +3,8 @@
    Portable token CSS for any consumer. The web app wires fonts via next/font in globals.css. */
 :root {
   /* Fonts */
-  --f-display: 'Souvenir', Georgia, 'Times New Roman', serif;
-  --f-body: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --f-display: 'Souvenir', 'Noto Serif Hebrew', Georgia, 'Times New Roman', serif;
+  --f-body: 'Plus Jakarta Sans', 'Rubik', system-ui, sans-serif;
   --f-display-he: 'Noto Serif Hebrew', 'Souvenir', serif;
   --f-body-he: 'Rubik', 'Plus Jakarta Sans', system-ui, sans-serif;
   --f-numbers: 'Souvenir', Georgia, serif;
@@ -31,13 +31,13 @@
   --c-data: var(--c-mineral);
 
   /* Type scale */
-  --t-xs: 0.58rem;
-  --t-sm: 0.75rem;
-  --t-base: 0.95rem;
-  --t-md: 1.25rem;
-  --t-lg: 1.8rem;
-  --t-xl: 2.5rem;
-  --t-2xl: 4rem;
+  --t-xs: 0.62rem;
+  --t-sm: 0.8rem;
+  --t-base: 1.02rem;
+  --t-md: 1.4rem;
+  --t-lg: 2.05rem;
+  --t-xl: 2.9rem;
+  --t-2xl: 4.8rem;
 
   /* Tracking */
   --ls-tight: 0.02em;

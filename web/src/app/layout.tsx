@@ -31,7 +31,9 @@ const jakarta = Plus_Jakarta_Sans({
 
 const notoSerifHebrew = Noto_Serif_Hebrew({
   variable: "--font-noto-serif-hebrew",
-  weight: ["300", "400"],
+  // Match the website's Hebrew display weights so headings (500/600) render
+  // crisply instead of synthesizing bold from 400.
+  weight: ["300", "400", "500", "600"],
   subsets: ["hebrew"],
   display: "swap",
 });

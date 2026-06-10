@@ -33,19 +33,19 @@ export const SEMANTIC = {
 } as const;
 
 export const TYPE = {
-  "display_en": "'Souvenir', Georgia, 'Times New Roman', serif",
-  "body_en": "'Plus Jakarta Sans', system-ui, sans-serif",
+  "display_en": "'Souvenir', 'Noto Serif Hebrew', Georgia, 'Times New Roman', serif",
+  "body_en": "'Plus Jakarta Sans', 'Rubik', system-ui, sans-serif",
   "display_he": "'Noto Serif Hebrew', 'Souvenir', serif",
   "body_he": "'Rubik', 'Plus Jakarta Sans', system-ui, sans-serif",
   "numbers": "'Souvenir', Georgia, serif",
   "sizes": {
-    "xs": "0.58rem",
-    "sm": "0.75rem",
-    "base": "0.95rem",
-    "md": "1.25rem",
-    "lg": "1.8rem",
-    "xl": "2.5rem",
-    "2xl": "4rem"
+    "xs": "0.62rem",
+    "sm": "0.8rem",
+    "base": "1.02rem",
+    "md": "1.4rem",
+    "lg": "2.05rem",
+    "xl": "2.9rem",
+    "2xl": "4.8rem"
   },
   "tracking": {
     "tight": "0.02em",
